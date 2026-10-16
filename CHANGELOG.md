@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 — 2026-10-16
+
+- Service and message texts no longer contain angle brackets, which hassfest reads as HTML (the capture folder is named in words). No change to how the integration works.
+
 ## 0.2.0 — 2026-10-16
 
 An admin panel and services for watching and using the bus; much less written to the database.

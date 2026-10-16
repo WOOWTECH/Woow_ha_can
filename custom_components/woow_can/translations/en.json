@@ -329,7 +329,7 @@
     },
     "capture": {
       "name": "Start or stop a recording",
-      "description": "Record an interface's frames to a candump log file under <config>/woow_can/captures. Admin only.",
+      "description": "Record an interface's frames to a candump log file in the woow_can/captures folder of the configuration directory. Admin only.",
       "fields": {
         "interface": {
           "name": "Interface",
@@ -386,7 +386,7 @@
       "message": "Invalid input: {error}"
     },
     "panel_not_loaded": {
-      "message": "The WOOW CAN admin panel entry is not loaded; add it under Settings > Devices & services > WOOW CAN."
+      "message": "The WOOW CAN admin panel entry is not loaded; add it under Settings › Devices & services › WOOW CAN."
     },
     "unknown_interface": {
       "message": "No WOOW CAN interface {interface}. Interfaces: {interfaces}."

@@ -275,7 +275,8 @@ control_periodic:
         text: null
 capture:
   name: Start or stop a recording
-  description: Record an interface's frames to a candump log file under <config>/woow_can/captures. Admin only.
+  description: Record an interface's frames to a candump log file in the woow_can/captures folder of the configuration
+    directory. Admin only.
   fields:
     interface:
       name: Interface

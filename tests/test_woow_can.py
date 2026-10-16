@@ -263,6 +263,13 @@ def test_translations_and_service_texts_agree():
         return out
 
     assert keys(en) == keys(zh)
+
+    def strings(d):
+        for v in d.values():
+            yield from strings(v) if isinstance(v, dict) else [v]
+
+    for lang in (en, zh):  # hassfest refuses anything that looks like HTML
+        assert not [t for t in strings(lang) if "<" in t or ">" in t]
     services = yaml.safe_load((HERE / "services.yaml").read_text(encoding="utf-8"))
     assert set(services) == set(en["services"])
     for name, spec in services.items():

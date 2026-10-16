@@ -329,7 +329,7 @@
     },
     "capture": {
       "name": "開始或停止擷取",
-      "description": "把介面的訊框錄成 candump 紀錄檔，存在 <config>/woow_can/captures。限管理員。",
+      "description": "把介面的訊框錄成 candump 紀錄檔，存在設定資料夾的 woow_can/captures。限管理員。",
       "fields": {
         "interface": {
           "name": "介面",
@@ -386,7 +386,7 @@
       "message": "輸入有誤：{error}"
     },
     "panel_not_loaded": {
-      "message": "WOOW CAN 的管理面板項目沒有載入；請到「設定 > 裝置與服務 > WOOW CAN」新增。"
+      "message": "WOOW CAN 的管理面板項目沒有載入；請到「設定 › 裝置與服務 › WOOW CAN」新增。"
     },
     "unknown_interface": {
       "message": "沒有叫 {interface} 的 WOOW CAN 介面。現有介面：{interfaces}。"
