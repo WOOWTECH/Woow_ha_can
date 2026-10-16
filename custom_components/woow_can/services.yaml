@@ -604,7 +604,7 @@ test_signal:
         number:
           min: -1000000
           max: 1000000
-          step: 1.0e-06
+          step: any
           mode: box
     offset:
       name: Offset
@@ -614,7 +614,7 @@ test_signal:
         number:
           min: -1000000
           max: 1000000
-          step: 1.0e-06
+          step: any
           mode: box
     seconds:
       name: Last seconds

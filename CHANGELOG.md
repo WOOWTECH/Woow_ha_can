@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 — 2026-10-16
+
+- The factor and offset fields of `test_signal` take any step (Home Assistant refuses number steps under 0.001, which failed hassfest). A test now checks every selector in services.yaml with Home Assistant's own schema. No change to how the integration works.
+
 ## 0.3.0 — 2026-10-16
 
 Signals and devices: frames decoded into Home Assistant entities, from templates or DBC files.

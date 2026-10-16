@@ -277,3 +277,18 @@ def test_translations_and_service_texts_agree():
         assert spec["name"] == en["services"][name]["name"]
         for field, config in (spec.get("fields") or {}).items():
             assert config["name"] == en["services"][name]["fields"][field]["name"], (name, field)
+
+
+def test_service_selectors_are_valid():
+    """hassfest validates every selector (a number step under 0.001 failed 0.3.0's CI)."""
+    import yaml
+
+    selector = pytest.importorskip("homeassistant.helpers.selector")
+    services = yaml.safe_load((HERE / "services.yaml").read_text(encoding="utf-8"))
+    for name, spec in services.items():
+        for field, config in (spec.get("fields") or {}).items():
+            if "selector" in config:
+                try:
+                    selector.validate_selector(config["selector"])
+                except Exception as err:  # noqa: BLE001 - voluptuous or probatio, whichever HA uses
+                    pytest.fail(f"{name}.{field}: {err}")
