@@ -1,0 +1,828 @@
+{
+ "id": "cia402_drive_monitor",
+ "version": 1,
+ "name": {
+  "en": "CANopen drive monitor (CiA 402)",
+  "zh-Hant": "CANopen 驅動器監看（CiA 402）"
+ },
+ "category": "industrial",
+ "description": {
+  "en": "Servo, stepper and frequency drives on CANopen (CiA 402, e.g. maxon EPOS4): the drive state from the statusword, fault and warning, and with polling on the actual position, velocity, torque, operating mode and error code read with SDO. It only reads: it never enables or moves a drive.",
+  "zh-Hant": "CANopen 上的伺服、步進、變頻驅動器（CiA 402，例如 maxon EPOS4）：由狀態字判斷驅動器狀態、故障與警告；開啟「主動輪詢」後再用 SDO 讀實際位置、速度、扭矩、運轉模式和錯誤碼。只讀取，不會啟用或移動驅動器。"
+ },
+ "bitrate": null,
+ "transmits": true,
+ "manufacturer": "CANopen",
+ "model": "CiA 402 drive",
+ "default_name": {
+  "en": "Drive",
+  "zh-Hant": "驅動器"
+ },
+ "source": [
+  "CiA 402 (facts only)",
+  "maxon EPOS4 firmware specification (objects, statusword table)",
+  "python canopen (MIT; state masks)"
+ ],
+ "license": "Facts from public documents, written by WOOWTECH; MIT",
+ "verified": [
+  "Statusword and SDO frames from the research scripts (EPOS4 objects)"
+ ],
+ "confidence": "high",
+ "notes": {
+  "en": "TPDO1 carries the statusword on most drives (EPOS4: enabled by default); without it, adopt the SDO state entities. Velocity units depend on the drive (EPOS4: rpm), positions are increments. Only one device should poll a drive with SDO: leave polling off where a PLC talks to it.",
+  "zh-Hant": "多數驅動器的 TPDO1 帶狀態字（EPOS4 出廠就開）；沒有的話改用「（SDO）」的狀態實體。速度單位依驅動器而定（EPOS4：rpm），位置是脈衝數。同一個驅動器只應有一個設備用 SDO 輪詢：已有 PLC 跟它通訊時請不要開輪詢。"
+ },
+ "params": [
+  {
+   "key": "node_id",
+   "default": 1,
+   "description": {
+    "en": "Node ID (1-127)",
+    "zh-Hant": "節點編號（1–127）"
+   }
+  },
+  {
+   "key": "heartbeat_ms",
+   "default": 1000,
+   "description": {
+    "en": "The node's heartbeat period in ms (object 0x1017)",
+    "zh-Hant": "節點的 heartbeat 週期，毫秒（物件 0x1017）"
+   }
+  }
+ ],
+ "groups": [],
+ "max_rate": 10,
+ "messages": [
+  {
+   "name": "Heartbeat",
+   "can_id": "0x700 + node_id",
+   "extended": false,
+   "length": 1,
+   "cycle_ms": "heartbeat_ms",
+   "signals": [
+    {
+     "name": "State",
+     "start": 0,
+     "length": 7,
+     "byte_order": "little",
+     "signed": false,
+     "values": {
+      "0": "boot_up",
+      "4": "stopped",
+      "5": "operational",
+      "127": "pre_operational"
+     },
+     "entity": {
+      "key": "node.state",
+      "name": {
+       "en": "NMT state",
+       "zh-Hant": "NMT 狀態"
+      },
+      "icon": "mdi:state-machine"
+     }
+    },
+    {
+     "name": "Online",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "derive": {
+      "op": "present"
+     },
+     "entity": {
+      "key": "node.online",
+      "name": {
+       "en": "Online",
+       "zh-Hant": "在線"
+      },
+      "platform": "binary_sensor",
+      "device_class": "connectivity",
+      "on_timeout": "off"
+     }
+    }
+   ]
+  },
+  {
+   "name": "Statusword_TPDO1",
+   "can_id": "0x180 + node_id",
+   "extended": false,
+   "length": 2,
+   "comment": "TPDO1: statusword 0x6041",
+   "signals": [
+    {
+     "name": "Statusword",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "drive.statusword",
+      "name": {
+       "en": "Statusword",
+       "zh-Hant": "狀態字"
+      },
+      "format": "hex",
+      "enabled": false
+     }
+    },
+    {
+     "name": "State",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "derive": {
+      "op": "masked_lookup",
+      "of": [
+       "Statusword"
+      ],
+      "table": [
+       [
+        "0x004F",
+        "0x0000",
+        "not_ready_to_switch_on"
+       ],
+       [
+        "0x004F",
+        "0x0040",
+        "switch_on_disabled"
+       ],
+       [
+        "0x006F",
+        "0x0021",
+        "ready_to_switch_on"
+       ],
+       [
+        "0x006F",
+        "0x0023",
+        "switched_on"
+       ],
+       [
+        "0x006F",
+        "0x0027",
+        "operation_enabled"
+       ],
+       [
+        "0x006F",
+        "0x0007",
+        "quick_stop_active"
+       ],
+       [
+        "0x004F",
+        "0x000F",
+        "fault_reaction_active"
+       ],
+       [
+        "0x004F",
+        "0x0008",
+        "fault"
+       ]
+      ]
+     },
+     "entity": {
+      "key": "drive.state",
+      "name": {
+       "en": "Drive state",
+       "zh-Hant": "驅動器狀態"
+      },
+      "enabled": true,
+      "options": [
+       "not_ready_to_switch_on",
+       "switch_on_disabled",
+       "ready_to_switch_on",
+       "switched_on",
+       "operation_enabled",
+       "quick_stop_active",
+       "fault_reaction_active",
+       "fault"
+      ],
+      "icon": "mdi:state-machine"
+     }
+    },
+    {
+     "name": "Fault",
+     "start": 3,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "drive.fault",
+      "name": {
+       "en": "Fault",
+       "zh-Hant": "故障"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    },
+    {
+     "name": "Warning",
+     "start": 7,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "drive.warning",
+      "name": {
+       "en": "Warning",
+       "zh-Hant": "警告"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    },
+    {
+     "name": "TargetReached",
+     "start": 10,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "drive.target_reached",
+      "name": {
+       "en": "Target reached",
+       "zh-Hant": "到達目標"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "Statusword_SDO",
+   "can_id": "0x580 + node_id",
+   "extended": false,
+   "length": 8,
+   "cycle_ms": 3000,
+   "filters": [
+    {
+     "byte": 0,
+     "values": [
+      "0x4F",
+      "0x4B",
+      "0x47",
+      "0x43",
+      "0x42"
+     ]
+    },
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x60"
+    },
+    {
+     "byte": 3,
+     "value": "0x00"
+    }
+   ],
+   "comment": "SDO upload response 6041:00",
+   "signals": [
+    {
+     "name": "SdoStatusword",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "drive.sdo_statusword",
+      "name": {
+       "en": "Statusword (SDO)",
+       "zh-Hant": "狀態字（SDO）"
+      },
+      "format": "hex",
+      "enabled": false
+     }
+    },
+    {
+     "name": "SdoState",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "derive": {
+      "op": "masked_lookup",
+      "of": [
+       "SdoStatusword"
+      ],
+      "table": [
+       [
+        "0x004F",
+        "0x0000",
+        "not_ready_to_switch_on"
+       ],
+       [
+        "0x004F",
+        "0x0040",
+        "switch_on_disabled"
+       ],
+       [
+        "0x006F",
+        "0x0021",
+        "ready_to_switch_on"
+       ],
+       [
+        "0x006F",
+        "0x0023",
+        "switched_on"
+       ],
+       [
+        "0x006F",
+        "0x0027",
+        "operation_enabled"
+       ],
+       [
+        "0x006F",
+        "0x0007",
+        "quick_stop_active"
+       ],
+       [
+        "0x004F",
+        "0x000F",
+        "fault_reaction_active"
+       ],
+       [
+        "0x004F",
+        "0x0008",
+        "fault"
+       ]
+      ]
+     },
+     "entity": {
+      "key": "drive.sdo_state",
+      "name": {
+       "en": "Drive state (SDO)",
+       "zh-Hant": "驅動器狀態（SDO）"
+      },
+      "enabled": false,
+      "options": [
+       "not_ready_to_switch_on",
+       "switch_on_disabled",
+       "ready_to_switch_on",
+       "switched_on",
+       "operation_enabled",
+       "quick_stop_active",
+       "fault_reaction_active",
+       "fault"
+      ],
+      "icon": "mdi:state-machine"
+     }
+    },
+    {
+     "name": "SdoFault",
+     "start": 35,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "drive.sdo_fault",
+      "name": {
+       "en": "Fault (SDO)",
+       "zh-Hant": "故障（SDO）"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "SdoWarning",
+     "start": 39,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "drive.sdo_warning",
+      "name": {
+       "en": "Warning (SDO)",
+       "zh-Hant": "警告（SDO）"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "SdoTargetReached",
+     "start": 42,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "drive.sdo_target_reached",
+      "name": {
+       "en": "Target reached (SDO)",
+       "zh-Hant": "到達目標（SDO）"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "Mode_SDO",
+   "can_id": "0x580 + node_id",
+   "extended": false,
+   "length": 8,
+   "cycle_ms": 6000,
+   "filters": [
+    {
+     "byte": 0,
+     "values": [
+      "0x4F",
+      "0x4B",
+      "0x47",
+      "0x43",
+      "0x42"
+     ]
+    },
+    {
+     "byte": 1,
+     "value": "0x61"
+    },
+    {
+     "byte": 2,
+     "value": "0x60"
+    },
+    {
+     "byte": 3,
+     "value": "0x00"
+    }
+   ],
+   "comment": "SDO upload response 6061:00",
+   "signals": [
+    {
+     "name": "ModeDisplay",
+     "start": 32,
+     "length": 8,
+     "byte_order": "little",
+     "signed": true,
+     "values": {
+      "1": "profile_position",
+      "2": "velocity",
+      "3": "profile_velocity",
+      "4": "profile_torque",
+      "6": "homing",
+      "7": "interpolated_position",
+      "8": "cyclic_sync_position",
+      "9": "cyclic_sync_velocity",
+      "10": "cyclic_sync_torque"
+     },
+     "entity": {
+      "key": "drive.mode",
+      "name": {
+       "en": "Operating mode",
+       "zh-Hant": "運轉模式"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "Position_SDO",
+   "can_id": "0x580 + node_id",
+   "extended": false,
+   "length": 8,
+   "cycle_ms": 1500,
+   "filters": [
+    {
+     "byte": 0,
+     "values": [
+      "0x4F",
+      "0x4B",
+      "0x47",
+      "0x43",
+      "0x42"
+     ]
+    },
+    {
+     "byte": 1,
+     "value": "0x64"
+    },
+    {
+     "byte": 2,
+     "value": "0x60"
+    },
+    {
+     "byte": 3,
+     "value": "0x00"
+    }
+   ],
+   "comment": "SDO upload response 6064:00",
+   "signals": [
+    {
+     "name": "PositionActual",
+     "start": 32,
+     "length": 32,
+     "byte_order": "little",
+     "signed": true,
+     "entity": {
+      "key": "drive.position",
+      "name": {
+       "en": "Actual position",
+       "zh-Hant": "實際位置"
+      },
+      "unit": "inc",
+      "precision": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "Velocity_SDO",
+   "can_id": "0x580 + node_id",
+   "extended": false,
+   "length": 8,
+   "cycle_ms": 1500,
+   "filters": [
+    {
+     "byte": 0,
+     "values": [
+      "0x4F",
+      "0x4B",
+      "0x47",
+      "0x43",
+      "0x42"
+     ]
+    },
+    {
+     "byte": 1,
+     "value": "0x6C"
+    },
+    {
+     "byte": 2,
+     "value": "0x60"
+    },
+    {
+     "byte": 3,
+     "value": "0x00"
+    }
+   ],
+   "comment": "SDO upload response 606C:00",
+   "signals": [
+    {
+     "name": "VelocityActual",
+     "start": 32,
+     "length": 32,
+     "byte_order": "little",
+     "signed": true,
+     "unit": "rpm",
+     "entity": {
+      "key": "drive.velocity",
+      "name": {
+       "en": "Actual velocity",
+       "zh-Hant": "實際速度"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "Torque_SDO",
+   "can_id": "0x580 + node_id",
+   "extended": false,
+   "length": 8,
+   "cycle_ms": 3000,
+   "filters": [
+    {
+     "byte": 0,
+     "values": [
+      "0x4F",
+      "0x4B",
+      "0x47",
+      "0x43",
+      "0x42"
+     ]
+    },
+    {
+     "byte": 1,
+     "value": "0x77"
+    },
+    {
+     "byte": 2,
+     "value": "0x60"
+    },
+    {
+     "byte": 3,
+     "value": "0x00"
+    }
+   ],
+   "comment": "SDO upload response 6077:00",
+   "signals": [
+    {
+     "name": "TorqueActual",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "factor": 0.1,
+     "unit": "%",
+     "entity": {
+      "key": "drive.torque",
+      "name": {
+       "en": "Actual torque",
+       "zh-Hant": "實際扭矩"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "ErrorCode_SDO",
+   "can_id": "0x580 + node_id",
+   "extended": false,
+   "length": 8,
+   "cycle_ms": 6000,
+   "filters": [
+    {
+     "byte": 0,
+     "values": [
+      "0x4F",
+      "0x4B",
+      "0x47",
+      "0x43",
+      "0x42"
+     ]
+    },
+    {
+     "byte": 1,
+     "value": "0x3F"
+    },
+    {
+     "byte": 2,
+     "value": "0x60"
+    },
+    {
+     "byte": 3,
+     "value": "0x00"
+    }
+   ],
+   "comment": "SDO upload response 603F:00",
+   "signals": [
+    {
+     "name": "ErrorCode",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "drive.error_code",
+      "name": {
+       "en": "Error code",
+       "zh-Hant": "錯誤碼"
+      },
+      "format": "hex"
+     }
+    }
+   ]
+  },
+  {
+   "name": "Emergency",
+   "can_id": "0x80 + node_id",
+   "extended": false,
+   "length": 8,
+   "signals": [
+    {
+     "name": "EmergencyCode",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "node.error_code",
+      "name": {
+       "en": "Emergency error code",
+       "zh-Hant": "緊急錯誤碼"
+      },
+      "format": "hex",
+      "enabled": false
+     }
+    },
+    {
+     "name": "ErrorRegister",
+     "start": 16,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false
+    }
+   ]
+  }
+ ],
+ "requests": [
+  {
+   "name": "Read mode",
+   "can_id": "0x600 + node_id",
+   "extended": false,
+   "data": [
+    "0x40",
+    "0x61",
+    "0x60",
+    "0x00",
+    "0",
+    "0",
+    "0",
+    "0"
+   ],
+   "period_ms": 2000,
+   "reply": "Mode_SDO",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read position",
+   "can_id": "0x600 + node_id",
+   "extended": false,
+   "data": [
+    "0x40",
+    "0x64",
+    "0x60",
+    "0x00",
+    "0",
+    "0",
+    "0",
+    "0"
+   ],
+   "period_ms": 500,
+   "reply": "Position_SDO",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read velocity",
+   "can_id": "0x600 + node_id",
+   "extended": false,
+   "data": [
+    "0x40",
+    "0x6C",
+    "0x60",
+    "0x00",
+    "0",
+    "0",
+    "0",
+    "0"
+   ],
+   "period_ms": 500,
+   "reply": "Velocity_SDO",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read torque",
+   "can_id": "0x600 + node_id",
+   "extended": false,
+   "data": [
+    "0x40",
+    "0x77",
+    "0x60",
+    "0x00",
+    "0",
+    "0",
+    "0",
+    "0"
+   ],
+   "period_ms": 1000,
+   "reply": "Torque_SDO",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read error code",
+   "can_id": "0x600 + node_id",
+   "extended": false,
+   "data": [
+    "0x40",
+    "0x3F",
+    "0x60",
+    "0x00",
+    "0",
+    "0",
+    "0",
+    "0"
+   ],
+   "period_ms": 2000,
+   "reply": "ErrorCode_SDO",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read statusword",
+   "can_id": "0x600 + node_id",
+   "extended": false,
+   "data": [
+    "0x40",
+    "0x41",
+    "0x60",
+    "0x00",
+    "0",
+    "0",
+    "0",
+    "0"
+   ],
+   "period_ms": 1000,
+   "reply": "Statusword_SDO",
+   "timeout_ms": 300
+  }
+ ]
+}

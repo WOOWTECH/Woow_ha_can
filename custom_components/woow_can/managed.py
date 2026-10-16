@@ -1,4 +1,5 @@
-"""Entities of devices: one per adopted signal (sensor or binary_sensor).
+"""Entities of devices: one per adopted signal (sensor, binary_sensor; switch, number, select, button while the
+device allows writing).
 
 Values arrive from DeviceManager whenever a message's data changes. An entity writes its state at most
 once per `min_interval` (1 s for numbers, 0.2 s for on/off and value lists), skips changes smaller than
@@ -15,18 +16,24 @@ import time
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
+from homeassistant.components.button import ButtonEntity
+from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.components.select import SelectEntity
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import slugify
 
 from .const import DOMAIN
-from .devices import Device, DeviceManager
-from .signals import Message, Signal, decimals
+from .devices import WRITE_PLATFORMS, Device, DeviceManager, write_view
+from .signals import DefinitionError, Message, Signal, decimals
 
 # unit -> (device class, unit Home Assistant expects)
 UNITS: dict[str, tuple[str | None, str]] = {
@@ -46,9 +53,12 @@ UNITS: dict[str, tuple[str | None, str]] = {
 }
 
 
+PLATFORMS = ("sensor", "binary_sensor") + WRITE_PLATFORMS
+
+
 def platform_of(sig: Signal) -> str:
     entity = sig.entity or {}
-    if entity.get("platform") in ("sensor", "binary_sensor"):
+    if entity.get("platform") in PLATFORMS:
         return entity["platform"]
     if sig.decoder_field is None and sig.length == 1 and not sig.values and sig.kind == "int" and not sig.derive:
         return "binary_sensor"
@@ -75,7 +85,7 @@ def build(manager: DeviceManager, device: Device, domain: str) -> list[Entity]:
     for msg, sig in device.adopted():
         if platform_of(sig) != domain:
             continue
-        out.append((SignalBinarySensor if domain == "binary_sensor" else SignalSensor)(manager, device, msg, sig))
+        out.append(ENTITY_CLASSES[domain](manager, device, msg, sig))
     return out
 
 
@@ -288,3 +298,121 @@ class SignalBinarySensor(SignalEntity, BinarySensorEntity):
         if self.cfg.get("nonzero") and isinstance(value, (int, float)):
             return value != 0
         return None
+
+
+# ---- writable signals (only while the device allows writing) ------------------------------------------
+class SignalWrite(SignalEntity, RestoreEntity):
+    """A signal that is also written: a command frame's field, or a status field with entity.write."""
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if not self.message.send or self._seen:
+            return  # status feedback shows the state
+        last = await self.async_get_last_state()
+        device = self.manager.devices.get(self.device_id)
+        if last is not None and device is not None and last.last_updated.timestamp() < device.created:
+            last = None  # a deleted device of the same name left it: not this device's outputs
+        value = self._restored(last.state) if last is not None else None
+        if value is not None:
+            self._value = self._pending = value
+            self._seen = True
+            self.manager.seed_written(self.device_id, self.message.name, self.signal.name, value)
+
+    def _restored(self, state: str) -> Any:
+        return None
+
+    async def _async_send_value(self, value: Any) -> None:
+        try:
+            await self.manager.async_write(self.device_id, self.message.name, self.signal.name, value, self._context)
+        except DefinitionError as err:
+            raise HomeAssistantError(f"{self.name}: {err}") from err
+
+
+class SignalSwitch(SignalWrite, SwitchEntity):
+    def __init__(self, manager: DeviceManager, device: Device, msg: Message, sig: Signal) -> None:
+        super().__init__(manager, device, msg, sig, "switch")
+        self._on_value = self.cfg.get("on", 1)
+        self._off_value = self.cfg.get("off", 0)
+
+    def _restored(self, state: str) -> Any:
+        return {"on": self._on_value, "off": self._off_value}.get(state)
+
+    @property
+    def is_on(self) -> bool | None:
+        value = self._value
+        if value is None:
+            return None
+        if value == self._on_value:
+            return True
+        if value == self._off_value:
+            return False
+        return bool(value)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._async_send_value(self._on_value)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._async_send_value(self._off_value)
+
+
+class SignalNumber(SignalWrite, NumberEntity):
+    def __init__(self, manager: DeviceManager, device: Device, msg: Message, sig: Signal) -> None:
+        super().__init__(manager, device, msg, sig, "number")
+        view = write_view(sig)
+        self._attr_native_min_value = float(view["min"])
+        self._attr_native_max_value = float(view["max"])
+        self._attr_native_step = float(self.cfg.get("step", abs(sig.factor) or 1))
+        self._attr_mode = NumberMode(self.cfg.get("mode", "box"))
+        unit = self.cfg.get("unit", sig.unit)
+        self._attr_native_unit_of_measurement = UNITS.get(unit, (None, unit))[1] if unit else None
+
+    def _restored(self, state: str) -> Any:
+        try:
+            return float(state)
+        except ValueError:
+            return None
+
+    @property
+    def native_value(self) -> float | None:
+        return self._value if isinstance(self._value, (int, float)) and not isinstance(self._value, bool) else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self._async_send_value(value)
+
+
+class SignalSelect(SignalWrite, SelectEntity):
+    def __init__(self, manager: DeviceManager, device: Device, msg: Message, sig: Signal) -> None:
+        super().__init__(manager, device, msg, sig, "select")
+        self._attr_options = list(sig.values.values())
+
+    def _restored(self, state: str) -> Any:
+        return state if state in self._attr_options else None
+
+    @property
+    def current_option(self) -> str | None:
+        return self._value if self._value in self._attr_options else None
+
+    async def async_select_option(self, option: str) -> None:
+        await self._async_send_value(option)
+
+
+class SignalButton(SignalEntity, ButtonEntity):
+    def __init__(self, manager: DeviceManager, device: Device, msg: Message, sig: Signal) -> None:
+        super().__init__(manager, device, msg, sig, "button")
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    async def async_press(self) -> None:
+        try:
+            await self.manager.async_write(self.device_id, self.message.name, self.signal.name, self.cfg["press"],
+                                           self._context)
+        except DefinitionError as err:
+            raise HomeAssistantError(f"{self.name}: {err}") from err
+
+
+ENTITY_CLASSES: dict[str, type[SignalEntity]] = {
+    "sensor": SignalSensor, "binary_sensor": SignalBinarySensor, "switch": SignalSwitch, "number": SignalNumber,
+    "select": SignalSelect, "button": SignalButton,
+}

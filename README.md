@@ -24,9 +24,9 @@ RS485／RS232 請改用 [WOOW Serial](https://github.com/WOOWTECH/Woow_ha_serial
 
 ## 裝置、範本與 DBC
 
-「裝置」分頁把訊框解成數值，選定的訊號會變成 Home Assistant 實體（感測器、二元感測器）：
+「裝置」分頁把訊框解成數值，選定的訊號會變成 Home Assistant 實體（感測器、二元感測器；允許寫入的裝置另有開關、數值、選單、按鈕）：
 
-- **內建範本**（都只監聽、不發送，每個都附出處、授權、驗證依據和可信度）：
+- **內建範本**（每個都附出處、授權、驗證依據和可信度；前五個只監聽，後四個要詢問設備或有輸出，見下方「主動輪詢與寫入」）：
 
 | 範本 | 適用 | 主要實體 |
 |---|---|---|
@@ -35,11 +35,23 @@ RS485／RS232 請改用 [WOOW Serial](https://github.com/WOOWTECH/Woow_ha_serial
 | J1939 作用中故障碼（DM1） | 同上，含多封包 BAM | 四個警示燈、故障數、故障碼（SPN／FMI） |
 | NMEA 2000 電池／直流狀態 | Victron VE.Can（Lynx Shunt、MPPT）、船、露營車 | 電壓、電流、功率、溫度、電量、健康度、剩餘時間 |
 | CANopen 節點監看 | 任何 CiA 301 設備 | 在線／離線（heartbeat 停止就變離線）、NMT 狀態、緊急錯誤碼 |
+| OBD-II 即時資料（Service 01，輪詢） | 汽車、輕型車（OBD-II 接頭） | 引擎轉速、車速、冷卻液／進氣／機油溫度、油量、模組電壓、負載、節氣門、油耗 |
+| Daly BMS（原生 CAN，輪詢） | Daly 智慧 BMS | 總電壓、電流、功率、電量、最高／最低電芯電壓與壓差、溫度、充放電 MOS、剩餘容量、故障 |
+| CANopen I/O 模組（CiA 401） | ICP DAS CAN-2053C／2057C／2017C 等 | 16 路數位輸入、16 路輸出開關（允許寫入後）、NMT 啟動按鈕、4 路類比輸入（SDO 輪詢） |
+| CANopen 驅動器監看（CiA 402） | 伺服、步進、變頻器（如 maxon EPOS4） | 驅動器狀態、故障、警告；輪詢實際位置、速度、扭矩、運轉模式、錯誤碼。只讀，不會啟動驅動器 |
 
 - **DBC 檔**：匯入後附加到介面，監看會用它命名和解碼訊框；從裡面挑訊息就能建立裝置。只讀需要的部分（訊息、訊號、Intel／Motorola、有號、浮點、數值表、註解、週期、多工、J1939 PGN），看不懂的行會列在匯入報告。
 - **每個實體各自節流**：數值最少 1 秒更新一次、變化小於半個解析度不寫；訊息超過「3 倍週期與 5 秒取大者」沒收到就變成無法使用。可以在面板或用 `set_signal` 調整。
 - 每個數值訊號都可以按「曲線」看即時變化。
 - 解碼不依賴外部套件；正確性用研究時驗證過的實機與範例訊框測試，並在 CI 跟 cantools 交叉比對。
+
+## 主動輪詢與寫入
+
+有些設備要問才答（OBD-II 汽車、Daly BMS、CANopen 的 SDO），有些設備有輸出（繼電器、設定值）。這些功能**預設都是關的**，要在「裝置」分頁對個別裝置開啟（會先跳出確認），或由 AI 用 `control_device` 開啟：
+
+- **主動輪詢**：依範本的請求清單定時詢問。很有節制：同一台裝置一次只等一個回覆、每台每秒最多 `max_rate` 個（OBD-II 合計約 6.7 個）、整個介面每秒最多 50 個；連續 3 次沒回應的請求會逐步放慢到每分鐘一次（例如車子熄火、車子沒有的 PID），一有回應就恢復。介面在只監聽、斷線或 bus off 時自動暫停。面板會列出每個請求的週期、已送、回覆和狀態。
+- **允許寫入**：開啟後才會建立開關、數值、選單、按鈕實體，也才接受 `write_signal`。共用同一個訊框的輸出（例如一個位元組裡 8 路繼電器）會以上次送出的內容為基礎，只改要改的那一路；Home Assistant 重新啟動後會先還原各輸出的最後狀態。數值會檢查上下限，同一個訊框兩次寫入至少間隔 50 ms。
+- 每次寫入都記在活動紀錄（誰、寫了什麼）。同一台設備只應有一個主控：已經有 PLC 在輪詢或控制的設備，請不要開啟。
 
 ## 找出未知訊號
 
@@ -85,6 +97,7 @@ RS485／RS232 請改用 [WOOW Serial](https://github.com/WOOWTECH/Woow_ha_serial
 | `list_templates`、`create_from_template` | 列出範本；由範本建立裝置（不指定群組時依流量判斷） |
 | `list_devices`、`get_device`、`save_device`、`delete_device` | 裝置的目前數值、完整定義；用 JSON 建立或修改裝置；刪除 |
 | `set_signal` | 把訊號變成實體或取消，或調整最短間隔、容差、逾時 |
+| `control_device`、`write_signal` | 開關裝置的主動輪詢、允許寫入；寫入一個訊號（輸出、設定值、指令） |
 | `decode_frame`、`test_signal` | 用介面上的定義解一筆訊框；拿最近的訊框試算一段位元（找數值在哪） |
 | `guided_capture`、`find_signal`、`bit_activity`、`add_signal` | 找出未知訊號：引導式擷取、依數值找訊號、位元活動；把找到的欄位加進裝置 |
 | `import_dbc`、`list_databases`、`attach_dbc`、`create_from_dbc` | 匯入 DBC、附加到介面、從 DBC 建立裝置 |
@@ -183,6 +196,8 @@ cd frontend && npm install && npm run build   # 面板（Lit），輸出到 cust
 - `tools/can_live_check.py`：在 SSH add-on 裡對執行中的 Home Assistant 做端對端檢查（服務、面板 websocket、週期發送、事件、錄製）。
 - `tools/template_check.py`：每個範本對照模擬器的實機檢查。
 - `tools/analysis_check.py`：檔案格式和分析工具的端對端檢查（轉檔、上傳 ASC、依數值找電池電壓、引導式擷取找出車門位元、加入裝置）。
+- `tools/active_check.py`：會發送的裝置端對端檢查（OBD-II、Daly、CiA 402 輪詢；CiA 401 的 NMT 啟動、輸出開關回接到輸入、類比輸入；關閉後不再發送）。
+- `tools/esp/`：ESP32 測試節點（ESPHome），在真實匯流排上扮演模擬器的設備，讓上面的檢查可以接實機跑。
 
 ## 授權
 

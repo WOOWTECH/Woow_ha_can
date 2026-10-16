@@ -1,0 +1,664 @@
+{
+ "id": "obd2_mode01",
+ "version": 1,
+ "name": {
+  "en": "OBD-II live data (Service 01)",
+  "zh-Hant": "OBD-II 即時資料（Service 01）"
+ },
+ "category": "vehicle",
+ "description": {
+  "en": "Cars and light vans through the OBD-II socket (pins 6 and 14): engine speed, vehicle speed, temperatures, fuel level, module voltage, asked for over ISO 15765-4. The car only answers questions, so this template sends requests — only after you turn on polling for the device. It never clears fault codes.",
+  "zh-Hant": "經 OBD-II 接頭（6、14 腳）讀汽車和輕型車：引擎轉速、車速、溫度、油量、模組電壓，依 ISO 15765-4 詢問取得。車輛只回答問題，所以這個範本會送出請求——要在裝置上開啟「主動輪詢」後才會送。不會清除故障碼。"
+ },
+ "bitrate": 500000,
+ "transmits": true,
+ "manufacturer": "OBD-II",
+ "model": "SAE J1979 / ISO 15765-4",
+ "default_name": {
+  "en": "Car",
+  "zh-Hant": "汽車"
+ },
+ "source": [
+  "ISO 15765-4:2005 (public.resource.org edition)",
+  "Wikipedia: OBD-II PIDs (CC BY-SA 4.0)",
+  "ELM327 data sheet (example frames)",
+  "CSS Electronics OBD2 DBC v1.3 (MIT; start bits)"
+ ],
+ "license": "Facts from public documents, written by WOOWTECH; MIT",
+ "verified": [
+  "Example requests and responses from Wikipedia and the ELM327 data sheet, decoded both by the J1979 formulas and the DBC signals"
+ ],
+ "confidence": "high",
+ "notes": {
+  "en": "Polite polling: one request at a time, about 6.7 a second in all; PIDs the car does not have get no answer and are asked again only every minute. Most cars use 500 kbit/s and 11-bit IDs; for 29-bit cars set request_id 18DB33F1, reply_id 18DAF100, reply_mask 1FFFFF00. Many new cars have a gateway that only answers OBD requests: listening alone shows nothing there.",
+  "zh-Hant": "有禮貌的輪詢：一次一個請求，合計每秒約 6.7 個；車子沒有的 PID 不會回答，之後每分鐘才再問一次。大多數車是 500 kbit/s、11-bit ID；29-bit 的車把 request_id 設 18DB33F1、reply_id 18DAF100、reply_mask 1FFFFF00。很多新車有閘道，只回 OBD 請求，單純監聽看不到東西。"
+ },
+ "params": [
+  {
+   "key": "request_id",
+   "default": "7DF",
+   "description": {
+    "en": "Request ID (7DF = all OBD ECUs, 7E0 = engine only)",
+    "zh-Hant": "請求 ID（7DF＝所有 OBD ECU、7E0＝只問引擎）"
+   }
+  },
+  {
+   "key": "reply_id",
+   "default": "7E8",
+   "description": {
+    "en": "Reply ID",
+    "zh-Hant": "回覆 ID"
+   }
+  },
+  {
+   "key": "reply_mask",
+   "default": "7F8",
+   "description": {
+    "en": "Reply ID mask (7F8 = any of 7E8-7EF)",
+    "zh-Hant": "回覆 ID 遮罩（7F8＝7E8–7EF 都收）"
+   }
+  }
+ ],
+ "groups": [],
+ "max_rate": 10,
+ "messages": [
+  {
+   "name": "PID_0C",
+   "can_id": "reply_id",
+   "id_mask": "reply_mask",
+   "length": 8,
+   "cycle_ms": 500,
+   "filters": [
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x0C"
+    }
+   ],
+   "comment": "Service 01 PID 0C: A * 256 + B",
+   "signals": [
+    {
+     "name": "EngineSpeed",
+     "start": 31,
+     "length": 16,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.25,
+     "unit": "rpm",
+     "entity": {
+      "key": "engine.speed",
+      "name": {
+       "en": "Engine speed",
+       "zh-Hant": "引擎轉速"
+      },
+      "enabled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "PID_0D",
+   "can_id": "reply_id",
+   "id_mask": "reply_mask",
+   "length": 8,
+   "cycle_ms": 500,
+   "filters": [
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x0D"
+    }
+   ],
+   "comment": "Service 01 PID 0D: A",
+   "signals": [
+    {
+     "name": "VehicleSpeed",
+     "start": 31,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "unit": "km/h",
+     "entity": {
+      "key": "vehicle.speed",
+      "name": {
+       "en": "Vehicle speed",
+       "zh-Hant": "車速"
+      },
+      "enabled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "PID_04",
+   "can_id": "reply_id",
+   "id_mask": "reply_mask",
+   "length": 8,
+   "cycle_ms": 2000,
+   "filters": [
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x04"
+    }
+   ],
+   "comment": "Service 01 PID 04: A",
+   "signals": [
+    {
+     "name": "EngineLoad",
+     "start": 31,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.392156862745,
+     "unit": "%",
+     "entity": {
+      "key": "engine.load",
+      "name": {
+       "en": "Engine load",
+       "zh-Hant": "引擎負載"
+      },
+      "enabled": false,
+      "precision": 1
+     }
+    }
+   ]
+  },
+  {
+   "name": "PID_11",
+   "can_id": "reply_id",
+   "id_mask": "reply_mask",
+   "length": 8,
+   "cycle_ms": 1000,
+   "filters": [
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x11"
+    }
+   ],
+   "comment": "Service 01 PID 11: A",
+   "signals": [
+    {
+     "name": "ThrottlePosition",
+     "start": 31,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.392156862745,
+     "unit": "%",
+     "entity": {
+      "key": "engine.throttle",
+      "name": {
+       "en": "Throttle position",
+       "zh-Hant": "節氣門開度"
+      },
+      "enabled": false,
+      "precision": 1
+     }
+    }
+   ]
+  },
+  {
+   "name": "PID_05",
+   "can_id": "reply_id",
+   "id_mask": "reply_mask",
+   "length": 8,
+   "cycle_ms": 5000,
+   "filters": [
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x05"
+    }
+   ],
+   "comment": "Service 01 PID 05: A",
+   "signals": [
+    {
+     "name": "CoolantTemperature",
+     "start": 31,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "offset": -40,
+     "unit": "°C",
+     "entity": {
+      "key": "engine.coolant_temperature",
+      "name": {
+       "en": "Coolant temperature",
+       "zh-Hant": "冷卻液溫度"
+      },
+      "enabled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "PID_0F",
+   "can_id": "reply_id",
+   "id_mask": "reply_mask",
+   "length": 8,
+   "cycle_ms": 10000,
+   "filters": [
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x0F"
+    }
+   ],
+   "comment": "Service 01 PID 0F: A",
+   "signals": [
+    {
+     "name": "IntakeAirTemperature",
+     "start": 31,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "offset": -40,
+     "unit": "°C",
+     "entity": {
+      "key": "engine.intake_air_temperature",
+      "name": {
+       "en": "Intake air temperature",
+       "zh-Hant": "進氣溫度"
+      },
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "PID_2F",
+   "can_id": "reply_id",
+   "id_mask": "reply_mask",
+   "length": 8,
+   "cycle_ms": 20000,
+   "filters": [
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x2F"
+    }
+   ],
+   "comment": "Service 01 PID 2F: A",
+   "signals": [
+    {
+     "name": "FuelLevel",
+     "start": 31,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.392156862745,
+     "unit": "%",
+     "entity": {
+      "key": "vehicle.fuel_level",
+      "name": {
+       "en": "Fuel level",
+       "zh-Hant": "油量"
+      },
+      "enabled": true,
+      "precision": 1
+     }
+    }
+   ]
+  },
+  {
+   "name": "PID_42",
+   "can_id": "reply_id",
+   "id_mask": "reply_mask",
+   "length": 8,
+   "cycle_ms": 5000,
+   "filters": [
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x42"
+    }
+   ],
+   "comment": "Service 01 PID 42: A * 256 + B",
+   "signals": [
+    {
+     "name": "ModuleVoltage",
+     "start": 31,
+     "length": 16,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.001,
+     "unit": "V",
+     "entity": {
+      "key": "vehicle.module_voltage",
+      "name": {
+       "en": "Control module voltage",
+       "zh-Hant": "控制模組電壓"
+      },
+      "enabled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "PID_46",
+   "can_id": "reply_id",
+   "id_mask": "reply_mask",
+   "length": 8,
+   "cycle_ms": 20000,
+   "filters": [
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x46"
+    }
+   ],
+   "comment": "Service 01 PID 46: A",
+   "signals": [
+    {
+     "name": "AmbientTemperature",
+     "start": 31,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "offset": -40,
+     "unit": "°C",
+     "entity": {
+      "key": "vehicle.ambient_temperature",
+      "name": {
+       "en": "Ambient temperature",
+       "zh-Hant": "外氣溫度"
+      },
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "PID_5C",
+   "can_id": "reply_id",
+   "id_mask": "reply_mask",
+   "length": 8,
+   "cycle_ms": 10000,
+   "filters": [
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x5C"
+    }
+   ],
+   "comment": "Service 01 PID 5C: A",
+   "signals": [
+    {
+     "name": "OilTemperature",
+     "start": 31,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "offset": -40,
+     "unit": "°C",
+     "entity": {
+      "key": "engine.oil_temperature",
+      "name": {
+       "en": "Engine oil temperature",
+       "zh-Hant": "機油溫度"
+      },
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "PID_5E",
+   "can_id": "reply_id",
+   "id_mask": "reply_mask",
+   "length": 8,
+   "cycle_ms": 2000,
+   "filters": [
+    {
+     "byte": 1,
+     "value": "0x41"
+    },
+    {
+     "byte": 2,
+     "value": "0x5E"
+    }
+   ],
+   "comment": "Service 01 PID 5E: A * 256 + B",
+   "signals": [
+    {
+     "name": "FuelRate",
+     "start": 31,
+     "length": 16,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.05,
+     "unit": "L/h",
+     "entity": {
+      "key": "engine.fuel_rate",
+      "name": {
+       "en": "Fuel rate",
+       "zh-Hant": "油耗"
+      },
+      "enabled": false
+     }
+    }
+   ]
+  }
+ ],
+ "requests": [
+  {
+   "name": "PID 0C",
+   "can_id": "request_id",
+   "data": [
+    "0x02",
+    "0x01",
+    "0x0C",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC"
+   ],
+   "period_ms": 500,
+   "reply": "PID_0C",
+   "timeout_ms": 200
+  },
+  {
+   "name": "PID 0D",
+   "can_id": "request_id",
+   "data": [
+    "0x02",
+    "0x01",
+    "0x0D",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC"
+   ],
+   "period_ms": 500,
+   "reply": "PID_0D",
+   "timeout_ms": 200
+  },
+  {
+   "name": "PID 04",
+   "can_id": "request_id",
+   "data": [
+    "0x02",
+    "0x01",
+    "0x04",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC"
+   ],
+   "period_ms": 2000,
+   "reply": "PID_04",
+   "timeout_ms": 200
+  },
+  {
+   "name": "PID 11",
+   "can_id": "request_id",
+   "data": [
+    "0x02",
+    "0x01",
+    "0x11",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC"
+   ],
+   "period_ms": 1000,
+   "reply": "PID_11",
+   "timeout_ms": 200
+  },
+  {
+   "name": "PID 05",
+   "can_id": "request_id",
+   "data": [
+    "0x02",
+    "0x01",
+    "0x05",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC"
+   ],
+   "period_ms": 5000,
+   "reply": "PID_05",
+   "timeout_ms": 200
+  },
+  {
+   "name": "PID 0F",
+   "can_id": "request_id",
+   "data": [
+    "0x02",
+    "0x01",
+    "0x0F",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC"
+   ],
+   "period_ms": 10000,
+   "reply": "PID_0F",
+   "timeout_ms": 200
+  },
+  {
+   "name": "PID 2F",
+   "can_id": "request_id",
+   "data": [
+    "0x02",
+    "0x01",
+    "0x2F",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC"
+   ],
+   "period_ms": 20000,
+   "reply": "PID_2F",
+   "timeout_ms": 200
+  },
+  {
+   "name": "PID 42",
+   "can_id": "request_id",
+   "data": [
+    "0x02",
+    "0x01",
+    "0x42",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC"
+   ],
+   "period_ms": 5000,
+   "reply": "PID_42",
+   "timeout_ms": 200
+  },
+  {
+   "name": "PID 46",
+   "can_id": "request_id",
+   "data": [
+    "0x02",
+    "0x01",
+    "0x46",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC"
+   ],
+   "period_ms": 20000,
+   "reply": "PID_46",
+   "timeout_ms": 200
+  },
+  {
+   "name": "PID 5C",
+   "can_id": "request_id",
+   "data": [
+    "0x02",
+    "0x01",
+    "0x5C",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC"
+   ],
+   "period_ms": 10000,
+   "reply": "PID_5C",
+   "timeout_ms": 200
+  },
+  {
+   "name": "PID 5E",
+   "can_id": "request_id",
+   "data": [
+    "0x02",
+    "0x01",
+    "0x5E",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC",
+    "0xCC"
+   ],
+   "period_ms": 2000,
+   "reply": "PID_5E",
+   "timeout_ms": 200
+  }
+ ]
+}

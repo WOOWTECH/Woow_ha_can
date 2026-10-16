@@ -1,0 +1,478 @@
+{
+ "id": "daly_bms",
+ "version": 1,
+ "name": {
+  "en": "Daly BMS (native CAN)",
+  "zh-Hant": "Daly BMS（原生 CAN）"
+ },
+ "category": "battery",
+ "description": {
+  "en": "Daly smart BMS on their own CAN protocol (not the 0x35x inverter protocol): pack voltage, current, state of charge, cell extremes, temperatures, MOS switches and faults. The BMS answers requests only, so this template sends them once you turn on polling for the device.",
+  "zh-Hant": "Daly 智慧 BMS 的原生 CAN 協定（不是給逆變器的 0x35x）：總電壓、電流、電量、電芯極值、溫度、MOS 開關與故障。BMS 只回答請求，所以要在裝置上開啟「主動輪詢」後這個範本才會送出請求。"
+ },
+ "bitrate": 250000,
+ "transmits": true,
+ "manufacturer": "Daly",
+ "model": "Smart BMS (CAN)",
+ "default_name": {
+  "en": "Daly BMS",
+  "zh-Hant": "Daly BMS"
+ },
+ "source": [
+  "Daly CAN Communications Protocol V1.0 (2019-06-11)",
+  "Daly UART protocol and community libraries (byte order; reference only)"
+ ],
+ "license": "Facts from the vendor document, written by WOOWTECH; MIT",
+ "verified": [
+  "The document's ID rule (0x18100140 / 0x18104001) and a worked example frame"
+ ],
+ "confidence": "medium",
+ "notes": {
+  "en": "The document does not state the byte order; big endian is assumed, as in Daly's UART protocol. The current's sign (above 30000 = charging) is assumed too. 250 kbit/s, 29-bit IDs.",
+  "zh-Hant": "原廠文件沒寫位元組順序，這裡跟 Daly 的 UART 協定一樣當作 big endian；電流正負（大於 30000 為充電）也是推定。250 kbit/s、29-bit ID。"
+ },
+ "params": [
+  {
+   "key": "bms_address",
+   "default": 1,
+   "description": {
+    "en": "BMS address (1)",
+    "zh-Hant": "BMS 位址（1）"
+   }
+  },
+  {
+   "key": "host_address",
+   "default": 64,
+   "description": {
+    "en": "This host's address (64 = 0x40)",
+    "zh-Hant": "本機位址（64＝0x40）"
+   }
+  }
+ ],
+ "groups": [],
+ "max_rate": 5,
+ "messages": [
+  {
+   "name": "Pack_90",
+   "can_id": "0x18900000 | (host_address << 8) | bms_address",
+   "length": 8,
+   "cycle_ms": 1000,
+   "signals": [
+    {
+     "name": "TotalVoltage",
+     "start": 7,
+     "length": 16,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.1,
+     "unit": "V",
+     "entity": {
+      "key": "battery.voltage",
+      "name": {
+       "en": "Pack voltage",
+       "zh-Hant": "總電壓"
+      }
+     }
+    },
+    {
+     "name": "AcquiredVoltage",
+     "start": 23,
+     "length": 16,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.1,
+     "unit": "V",
+     "entity": {
+      "key": "battery.acquired_voltage",
+      "name": {
+       "en": "Acquired voltage",
+       "zh-Hant": "採集總壓"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "Current",
+     "start": 39,
+     "length": 16,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.1,
+     "offset": -3000,
+     "unit": "A",
+     "entity": {
+      "key": "battery.current",
+      "name": {
+       "en": "Current",
+       "zh-Hant": "電流"
+      }
+     }
+    },
+    {
+     "name": "SOC",
+     "start": 55,
+     "length": 16,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.1,
+     "unit": "%",
+     "entity": {
+      "key": "battery.soc",
+      "name": {
+       "en": "State of charge",
+       "zh-Hant": "電量"
+      },
+      "device_class": "battery"
+     }
+    },
+    {
+     "name": "Power",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "W",
+     "derive": {
+      "op": "product",
+      "of": [
+       "TotalVoltage",
+       "Current"
+      ]
+     },
+     "entity": {
+      "key": "battery.power",
+      "name": {
+       "en": "Power",
+       "zh-Hant": "功率"
+      },
+      "precision": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "Cells_91",
+   "can_id": "0x18910000 | (host_address << 8) | bms_address",
+   "length": 8,
+   "cycle_ms": 2000,
+   "signals": [
+    {
+     "name": "MaxCellVoltage",
+     "start": 7,
+     "length": 16,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.001,
+     "unit": "V",
+     "entity": {
+      "key": "battery.max_cell_voltage",
+      "name": {
+       "en": "Highest cell voltage",
+       "zh-Hant": "最高電芯電壓"
+      }
+     }
+    },
+    {
+     "name": "MaxCellNumber",
+     "start": 23,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "entity": {
+      "key": "battery.max_cell_number",
+      "name": {
+       "en": "Highest cell",
+       "zh-Hant": "最高電芯編號"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "MinCellVoltage",
+     "start": 31,
+     "length": 16,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.001,
+     "unit": "V",
+     "entity": {
+      "key": "battery.min_cell_voltage",
+      "name": {
+       "en": "Lowest cell voltage",
+       "zh-Hant": "最低電芯電壓"
+      }
+     }
+    },
+    {
+     "name": "MinCellNumber",
+     "start": 47,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "entity": {
+      "key": "battery.min_cell_number",
+      "name": {
+       "en": "Lowest cell",
+       "zh-Hant": "最低電芯編號"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "CellDelta",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 1000,
+     "unit": "mV",
+     "derive": {
+      "op": "difference",
+      "of": [
+       "MaxCellVoltage",
+       "MinCellVoltage"
+      ]
+     },
+     "entity": {
+      "key": "battery.cell_delta",
+      "name": {
+       "en": "Cell voltage difference",
+       "zh-Hant": "電芯壓差"
+      },
+      "precision": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "Temperatures_92",
+   "can_id": "0x18920000 | (host_address << 8) | bms_address",
+   "length": 8,
+   "cycle_ms": 2000,
+   "signals": [
+    {
+     "name": "MaxTemperature",
+     "start": 7,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "offset": -40,
+     "unit": "°C",
+     "entity": {
+      "key": "battery.max_temperature",
+      "name": {
+       "en": "Highest temperature",
+       "zh-Hant": "最高溫度"
+      }
+     }
+    },
+    {
+     "name": "MaxTemperatureSensor",
+     "start": 15,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false
+    },
+    {
+     "name": "MinTemperature",
+     "start": 23,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "offset": -40,
+     "unit": "°C",
+     "entity": {
+      "key": "battery.min_temperature",
+      "name": {
+       "en": "Lowest temperature",
+       "zh-Hant": "最低溫度"
+      }
+     }
+    },
+    {
+     "name": "MinTemperatureSensor",
+     "start": 31,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false
+    }
+   ]
+  },
+  {
+   "name": "Mos_93",
+   "can_id": "0x18930000 | (host_address << 8) | bms_address",
+   "length": 8,
+   "cycle_ms": 5000,
+   "signals": [
+    {
+     "name": "State",
+     "start": 7,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "values": {
+      "0": "idle",
+      "1": "charging",
+      "2": "discharging"
+     },
+     "entity": {
+      "key": "battery.state",
+      "name": {
+       "en": "State",
+       "zh-Hant": "狀態"
+      }
+     }
+    },
+    {
+     "name": "ChargeMos",
+     "start": 15,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "entity": {
+      "key": "battery.charge_mos",
+      "name": {
+       "en": "Charge MOS",
+       "zh-Hant": "充電 MOS"
+      },
+      "platform": "binary_sensor"
+     }
+    },
+    {
+     "name": "DischargeMos",
+     "start": 23,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false,
+     "entity": {
+      "key": "battery.discharge_mos",
+      "name": {
+       "en": "Discharge MOS",
+       "zh-Hant": "放電 MOS"
+      },
+      "platform": "binary_sensor"
+     }
+    },
+    {
+     "name": "BmsLife",
+     "start": 31,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false
+    },
+    {
+     "name": "RemainingCapacity",
+     "start": 39,
+     "length": 32,
+     "byte_order": "big",
+     "signed": false,
+     "factor": 0.001,
+     "unit": "Ah",
+     "entity": {
+      "key": "battery.remaining_capacity",
+      "name": {
+       "en": "Remaining capacity",
+       "zh-Hant": "剩餘容量"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "Faults_98",
+   "can_id": "0x18980000 | (host_address << 8) | bms_address",
+   "length": 8,
+   "cycle_ms": 5000,
+   "signals": [
+    {
+     "name": "FaultBits",
+     "start": 7,
+     "length": 56,
+     "byte_order": "big",
+     "signed": false,
+     "entity": {
+      "key": "battery.fault_bits",
+      "name": {
+       "en": "Fault bits",
+       "zh-Hant": "故障位元"
+      },
+      "format": "hex",
+      "enabled": false
+     }
+    },
+    {
+     "name": "FaultCode",
+     "start": 63,
+     "length": 8,
+     "byte_order": "big",
+     "signed": false
+    },
+    {
+     "name": "Fault",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "derive": {
+      "op": "nonzero",
+      "of": [
+       "FaultBits"
+      ]
+     },
+     "entity": {
+      "key": "battery.fault",
+      "name": {
+       "en": "BMS fault",
+       "zh-Hant": "BMS 故障"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    }
+   ]
+  }
+ ],
+ "requests": [
+  {
+   "name": "Read 90",
+   "can_id": "0x18900000 | (bms_address << 8) | host_address",
+   "data": "00 00 00 00 00 00 00 00",
+   "period_ms": 1000,
+   "reply": "Pack_90",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read 91",
+   "can_id": "0x18910000 | (bms_address << 8) | host_address",
+   "data": "00 00 00 00 00 00 00 00",
+   "period_ms": 2000,
+   "reply": "Cells_91",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read 92",
+   "can_id": "0x18920000 | (bms_address << 8) | host_address",
+   "data": "00 00 00 00 00 00 00 00",
+   "period_ms": 2000,
+   "reply": "Temperatures_92",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read 93",
+   "can_id": "0x18930000 | (bms_address << 8) | host_address",
+   "data": "00 00 00 00 00 00 00 00",
+   "period_ms": 5000,
+   "reply": "Mos_93",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read 98",
+   "can_id": "0x18980000 | (bms_address << 8) | host_address",
+   "data": "00 00 00 00 00 00 00 00",
+   "period_ms": 5000,
+   "reply": "Faults_98",
+   "timeout_ms": 300
+  }
+ ]
+}

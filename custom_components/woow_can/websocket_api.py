@@ -667,3 +667,57 @@ async def ws_device_add_signal(hass: HomeAssistant, connection: websocket_api.Ac
                {"device": device.name, "signal": f"{message}.{signal['name']}"}, device_id=device.id,
                port_id=device.interface)
     connection.send_result(msg["id"], admin.devices.device_view(device))
+
+
+# ---- devices that send ------------------------------------------------------------------------------
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/devices/options",
+    vol.Required("device_id"): str,
+    vol.Optional("active"): bool,
+    vol.Optional("allow_write"): bool,
+})
+@websocket_api.async_response
+async def ws_device_options(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Turn a device's requests (polling) or writing on / off."""
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        device = await admin.async_device_options(msg["device_id"], msg.get("active"), msg.get("allow_write"))
+    except DefinitionError as err:
+        _definition_error(connection, msg, err)
+        return
+    await _log(admin, connection, "control_device", "device_options",
+               {"device": device.name, "active": "on" if device.active else "off",
+                "allow_write": "on" if device.allow_write else "off"}, device_id=device.id, port_id=device.interface)
+    connection.send_result(msg["id"], admin.devices.device_view(device))
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/devices/write",
+    vol.Required("device_id"): str,
+    vol.Required("message"): str,
+    vol.Required("signal"): str,
+    vol.Required("value"): vol.Any(int, float, str, bool),
+})
+@websocket_api.async_response
+async def ws_device_write(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Write one signal of a device that allows writing (the panel's controls)."""
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    value = msg["value"]
+    if isinstance(value, bool):
+        value = int(value)
+    try:
+        data = await admin.devices.async_write(msg["device_id"], msg["message"], msg["signal"], value,
+                                               connection.context(msg))
+    except DefinitionError as err:
+        _definition_error(connection, msg, err)
+        return
+    except HomeAssistantError as err:
+        connection.send_error(msg["id"], "failed", str(err))
+        return
+    connection.send_result(msg["id"], {"data": data.hex(" ").upper()})

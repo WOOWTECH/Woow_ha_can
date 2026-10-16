@@ -346,7 +346,6 @@ def compare(phases: list[dict[int, list[bytes]]], id_text: Any, limit: int = 20)
     whose levels do not overlap; IDs that only appear during the action. "Steady" allows a few frames of
     the old value at a phase's start, as people press next a moment before or after they act; counter
     bits are left out. A change seen in every repetition is "confirmed"."""
-    idle, action = phases[0::2], phases[1::2]
     repeated = len(phases) >= 3
     out = []
     for key in sorted(set().union(*phases)):

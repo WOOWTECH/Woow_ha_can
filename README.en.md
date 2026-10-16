@@ -24,9 +24,9 @@ The panel gets a batch every 250 ms and must acknowledge each one before the nex
 
 ## Devices, templates and DBC files
 
-The Devices tab decodes frames into values; chosen signals become Home Assistant entities (sensors and binary sensors):
+The Devices tab decodes frames into values; chosen signals become Home Assistant entities (sensors and binary sensors; switches, numbers, selects and buttons on devices that allow writing):
 
-- **Built-in templates** (all of them only listen; each names its sources, license, what it was checked against and its confidence):
+- **Built-in templates** (each names its sources, license, what it was checked against and its confidence; the first five only listen, the last four ask their equipment or have outputs, see "Polling and writing"):
 
 | Template | For | Main entities |
 |---|---|---|
@@ -35,11 +35,23 @@ The Devices tab decodes frames into values; chosen signals become Home Assistant
 | J1939 active faults (DM1) | The same, including multi-frame BAM | Four lamps, number of faults, fault codes (SPN / FMI) |
 | NMEA 2000 battery / DC status | Victron VE.Can (Lynx Shunt, MPPT), boats, campers | Voltage, current, power, temperature, state of charge and health, time remaining |
 | CANopen node monitor | Any CiA 301 device | Online / offline (off when the heartbeat stops), NMT state, emergency error code |
+| OBD-II live data (Service 01, polling) | Cars and light vans (OBD-II socket) | Engine speed, vehicle speed, coolant / intake / oil temperature, fuel level, module voltage, load, throttle, fuel rate |
+| Daly BMS (native CAN, polling) | Daly smart BMS | Pack voltage, current, power, state of charge, highest / lowest cell and their difference, temperatures, charge / discharge MOS, remaining capacity, faults |
+| CANopen I/O module (CiA 401) | ICP DAS CAN-2053C / 2057C / 2017C and similar | 16 digital inputs, 16 output switches (once writing is allowed), an NMT start button, 4 analogue inputs (SDO polling) |
+| CANopen drive monitor (CiA 402) | Servo, stepper and frequency drives (maxon EPOS4 ...) | Drive state, fault, warning; polled actual position, velocity, torque, operating mode, error code. Read only: it never enables a drive |
 
 - **DBC files**: attached to an interface they name and decode the monitor's rows; make a device from some of their messages. The reader covers what matters (messages, signals, Intel / Motorola, signed, float, value tables, comments, cycle times, multiplexing, J1939 PGNs) and lists what it skipped.
 - **Each entity is throttled on its own**: numbers at most once a second, changes under half a resolution step are not written; silent for longer than max(3 cycles, 5 s) the entity turns unavailable. Tune it in the panel or with `set_signal`.
 - Every numeric signal can be charted live.
 - Decoding needs no external package; it is tested against the verified real and example frames from the research, and compared with cantools in CI.
+
+## Polling and writing
+
+Some equipment answers only when asked (OBD-II cars, Daly BMS, CANopen SDO), some has outputs (relays, set points). Both are **off by default** and turned on per device in the Devices tab (after a confirmation), or by an agent with `control_device`:
+
+- **Polling** asks with the template's requests, politely: one request of a device waits for its reply at a time, a device sends at most `max_rate` a second (OBD-II about 6.7 in all), an interface at most 50; a request unanswered three times in a row slows down step by step to once a minute (an engine switched off, a PID the car does not have) and recovers with the first reply. Polling pauses while the interface is listen-only, down or bus-off. The panel lists each request's period, counts and state.
+- **Allow writing** creates the switch, number, select and button entities and accepts `write_signal`. Outputs that share a frame (eight relays in one byte) are written over the last frame sent, so only the one changed moves; after Home Assistant restarts, the outputs' last states are restored first. Numbers are checked against their range; two writes of one frame are at least 50 ms apart.
+- Every write goes to the activity log (who, what). Only one master per piece of equipment: leave both off where a PLC already polls or controls it.
 
 ## Finding unknown signals
 
@@ -85,6 +97,7 @@ For equipment without a DBC file or a template, the Analyze tab finds where the 
 | `list_templates`, `create_from_template` | Templates; make a device from one (groups detected from traffic unless given) |
 | `list_devices`, `get_device`, `save_device`, `delete_device` | Devices with current values and full definitions; create or change one from JSON; delete |
 | `set_signal` | Make a signal an entity or drop it; minimum interval, tolerance, timeout |
+| `control_device`, `write_signal` | Turn a device's polling and writing on / off; write one signal (an output, a set point, a command) |
 | `decode_frame`, `test_signal` | Decode one frame with the interface's definitions; try a bit field on recent frames (where is the value?) |
 | `guided_capture`, `find_signal`, `bit_activity`, `add_signal` | Find unknown signals: guided capture, find by value, bit activity; put a found field into a device |
 | `import_dbc`, `list_databases`, `attach_dbc`, `create_from_dbc` | Import a DBC file, attach it, make a device from it |
@@ -183,6 +196,8 @@ cd frontend && npm install && npm run build   # the panel (Lit), built into cust
 - `tools/can_live_check.py`: end-to-end check against a running Home Assistant, from the SSH add-on (services, panel websocket, periodic sends, events, recordings).
 - `tools/template_check.py`: every template against the simulator, live.
 - `tools/analysis_check.py`: the file formats and analysis tools end to end (conversions, an uploaded ASC, finding the battery voltage, the door bit by guided capture, adding to a device).
+- `tools/active_check.py`: devices that send, end to end (OBD-II, Daly and CiA 402 polling; CiA 401 NMT start, output switches looped back to inputs, analogue inputs; nothing sent once off).
+- `tools/esp/`: an ESP32 test node (ESPHome) that plays the simulator's equipment on a real bus, so the checks above can run against hardware.
 
 ## License
 

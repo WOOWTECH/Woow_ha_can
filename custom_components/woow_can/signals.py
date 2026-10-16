@@ -96,6 +96,31 @@ def number(value: Any, params: dict[str, Any] | None = None) -> int:
     return run(tree)
 
 
+def parse_can_id(value: Any, params: dict[str, Any] | None = None, extended: bool | None = None) -> tuple[int, bool]:
+    """A CAN ID and whether it is 29-bit: as written ("7DF" 11-bit, "18DB33F1" 29-bit), or by its size."""
+    can_id = number(value, params)
+    if extended is None:
+        text = str(value).strip()
+        digits = text[2:] if text[:2].lower() == "0x" else text
+        extended = can_id > SFF_MASK or (is_hex(text) and len(digits) > 3)
+    if can_id > (EFF_MASK if extended else SFF_MASK) or can_id < 0:
+        raise DefinitionError("bad_id", can_id=str(value))
+    return can_id, bool(extended)
+
+
+def frame_data(value: Any, params: dict[str, Any] | None = None) -> bytes:
+    """Frame bytes from hex text ("40 41 60 00 00 00 00 00") or a list of byte expressions (["0x01", "node_id"])."""
+    if isinstance(value, (list, tuple)):
+        out = [number(v, params) for v in value]
+        if any(not 0 <= b <= 0xFF for b in out):
+            raise DefinitionError("bad_data", data=str(value))
+        return bytes(out)
+    try:
+        return bytes.fromhex(str(value).replace(" ", ""))
+    except ValueError as err:
+        raise DefinitionError("bad_data", data=str(value)) from err
+
+
 def decimal_number(value: Any) -> int:
     """A PGN or other decimal number: ints and decimal text."""
     if isinstance(value, int) and not isinstance(value, bool):
@@ -340,7 +365,9 @@ class Message:
     id_mask: int | None = None  # bits of the ID that must match; None = all of them
     pgn: int | None = None  # J1939 / NMEA 2000: match by PGN, any priority
     source: int | None = None  # J1939 / NMEA 2000 source address to accept (None = any)
-    filters: list[tuple[int, int]] = field(default_factory=list)  # (byte, value) the data must have
+    filters: list[tuple[int, tuple[int, ...]]] = field(default_factory=list)  # (byte, values it may have)
+    send: bool = False  # a frame this integration sends (commands), not one it decodes
+    base: bytes | None = None  # fixed bytes of a sent frame, under its signals ("data" in JSON)
     transport: str | None = None  # "j1939_tp" (BAM reassembly) or "n2k_fast" (fast-packet)
     decoder: str | None = None  # "j1939_dm1"
     comment: str = ""
@@ -390,7 +417,7 @@ class Message:
         elif (raw & (EFF_MASK if ext else SFF_MASK)) != self.can_id:
             return False
         if data is not None and self.filters:
-            return all(len(data) > i and data[i] == v for i, v in self.filters)
+            return all(len(data) > i and data[i] in vs for i, vs in self.filters)
         return True
 
     @property
@@ -435,11 +462,13 @@ class Message:
         return {k: v for k, v in values.items() if only is None or k in only}
 
     def build(self, values: dict[str, Any], base: bytes | None = None) -> bytes:
-        """Frame data with the given signal values, over `base` (the last frame) or the start values."""
+        """Frame data with the given signal values, over `base` (the last frame) or the fixed bytes and start
+        values."""
+        base = base or self.base
         data = bytearray(base[:self.length] if base else bytes(self.length))
         if len(data) < self.length:
             data.extend(bytes(self.length - len(data)))
-        if not base:
+        if not base or base is self.base:
             for sig in self.signals:
                 if sig.start_value is not None and not sig.derive and not sig.decoder_field:
                     sig.insert(data, sig.start_value)
@@ -478,7 +507,9 @@ class Message:
             source = None if source in (None, "", "any") else number(source, params)
             cycle = raw.get("cycle_ms")
             cycle = number(cycle, params) if isinstance(cycle, str) else cycle
-            filters = [(int(f["byte"]), number(f["value"], params)) for f in raw.get("filters") or []]
+            filters = [(int(f["byte"]), tuple(number(v, params) for v in (f["values"] if "values" in f else [f["value"]])))
+                       for f in raw.get("filters") or []]
+            base = frame_data(raw["data"], params) if raw.get("data") else None
             return cls(
                 name=str(raw.get("name") or f"{can_id:X}"),
                 can_id=can_id & EFF_MASK,
@@ -486,10 +517,12 @@ class Message:
                 length=int(raw.get("length", 8)),
                 signals=[Signal.from_dict(s, params) for s in raw.get("signals") or []],
                 cycle_ms=None if cycle in (None, 0) else int(cycle),
-                id_mask=None if raw.get("id_mask") is None else number(raw["id_mask"]),
+                id_mask=None if raw.get("id_mask") is None else number(raw["id_mask"], params),
                 pgn=None if pgn is None else decimal_number(pgn),
                 source=source,
                 filters=filters,
+                send=bool(raw.get("send", False)),
+                base=base,
                 transport=raw.get("transport"),
                 decoder=raw.get("decoder"),
                 comment=str(raw.get("comment", "")),
@@ -515,7 +548,12 @@ class Message:
         if self.id_mask is not None:
             out["id_mask"] = f"{self.id_mask:08X}"
         if self.filters:
-            out["filters"] = [{"byte": b, "value": v} for b, v in self.filters]
+            out["filters"] = [{"byte": b, "value": vs[0]} if len(vs) == 1 else {"byte": b, "values": list(vs)}
+                              for b, vs in self.filters]
+        if self.send:
+            out["send"] = True
+        if self.base is not None:
+            out["data"] = self.base.hex(" ").upper()
         for key in ("transport", "decoder"):
             if getattr(self, key):
                 out[key] = getattr(self, key)
@@ -533,7 +571,7 @@ class Message:
 
 
 # ---- derived values --------------------------------------------------------------------------------
-DERIVE_OPS = ("product", "sum", "difference", "any", "nonzero", "present")
+DERIVE_OPS = ("product", "sum", "difference", "any", "nonzero", "present", "masked_lookup")
 
 
 def derive(sig: Signal, parts: list[Any]) -> Any:
@@ -542,6 +580,13 @@ def derive(sig: Signal, parts: list[Any]) -> Any:
     op = sig.derive.get("op") if sig.derive else None
     if op == "present":
         return 1
+    if op == "masked_lookup":  # the first [mask, value, label] whose value equals the part masked (CiA 402 states)
+        if not parts or not isinstance(parts[0], int) or isinstance(parts[0], bool):
+            return None
+        for mask, value, label in sig.derive.get("table", []):
+            if parts[0] & number(mask) == number(value):
+                return label
+        return None
     if op == "any":
         want = sig.derive.get("equals", 1)
         known = [p for p in parts if p is not None]

@@ -134,10 +134,40 @@ class AdminHub:
             self.devices.subscribe(self._send),
             self.hass.bus.async_listen(EVENT_HOMEASSISTANT_FINAL_WRITE, self._async_final_write),
         ]
+        self.devices.cannot_send = self._cannot_send
+        self.devices.sender = self._device_send
+        self.devices.on_written = self._on_written
         self.devices.start()
         for hub in self.hubs.values():
             hub.frame_hook = self.devices.on_frame
         await async_register_panel(self.hass)
+
+    # ---- devices that send ----------------------------------------------------------------
+    def _cannot_send(self, entry_id: str) -> str | None:
+        """Why a device's interface cannot send right now (None: it can)."""
+        hub = self.hubs.get(entry_id)
+        if hub is None:
+            return "interface not loaded"
+        if not hub.io.is_open:
+            return "interface down"
+        if hub.cfg.listen_only and not hub.io.virtual:
+            return "listen-only"
+        if hub.status.get("state") in ("bus_off", "stopped"):
+            return f"bus state {hub.status['state']}"
+        return None
+
+    async def _device_send(self, entry_id: str, frame: CanFrame) -> None:
+        hub = self.hubs.get(entry_id)
+        if hub is None:
+            raise HomeAssistantError("the interface is not loaded")
+        await hub.async_send(frame)
+
+    @callback
+    def _on_written(self, device: Any, message: str, signal: str, value: Any, context: Any) -> None:
+        self.hass.async_create_task(self.activity.async_record(
+            "entity", "write_signal", "signal_written", {"device": device.name, "signal": f"{message}.{signal}",
+                                                         "value": value},
+            context=context, device_id=device.id, port_id=device.interface))
 
     async def async_stop(self) -> None:
         self.periodic.shutdown()
@@ -332,6 +362,23 @@ class AdminHub:
                         current[key] = value
                 current.setdefault("enabled", True)
                 sig["entity"] = current
+        return await self.devices.async_save(raw)
+
+    async def async_device_options(self, device_ref: str, active: bool | None = None,
+                                   allow_write: bool | None = None):
+        """Turn a device's requests (polling) and writing on or off."""
+        device = self.devices.resolve(device_ref)
+        if device is None:
+            raise DefinitionError("unknown_device", device=device_ref)
+        raw = device.as_dict()
+        if active is not None:
+            if active and not device.requests:
+                raise DefinitionError("no_requests", device=device.name)
+            raw["active"] = active
+        if allow_write is not None:
+            if allow_write and not device.writable:
+                raise DefinitionError("nothing_to_write", device=device.name)
+            raw["allow_write"] = allow_write
         return await self.devices.async_save(raw)
 
     def seen_ids(self, entry_id: str) -> set[int]:

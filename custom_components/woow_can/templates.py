@@ -16,6 +16,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from .devices import Device
 from .signals import DefinitionError, Message
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,15 +40,19 @@ def defaults(template: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate(template: dict[str, Any]) -> None:
-    """Every message compiles with the default parameters (raises DefinitionError)."""
+    """Every message and request compiles with the default parameters (raises DefinitionError)."""
     if not template.get("id") or not template.get("messages"):
         raise DefinitionError("bad_template", template=template.get("id", "?"))
     params = defaults(template)
     group_ids = {g["id"] for g in template.get("groups") or []}
+    for item in template["messages"] + (template.get("requests") or []):
+        if item.get("group") and item["group"] not in group_ids:
+            raise DefinitionError("unknown_group", template=template["id"], group=item["group"])
     for msg in template["messages"]:
-        if msg.get("group") and msg["group"] not in group_ids:
-            raise DefinitionError("unknown_group", template=template["id"], group=msg["group"])
         Message.from_dict(msg, params)
+    strip = (lambda items: [{k: v for k, v in i.items() if k != "group"} for i in items])
+    Device.from_dict({"name": "check", "interface": "check", "params": params, "messages": strip(template["messages"]),
+                      "requests": strip(template.get("requests") or []), "max_rate": template.get("max_rate", 10)})
 
 
 class TemplateLibrary:
@@ -132,14 +137,23 @@ class TemplateLibrary:
                 raise DefinitionError("unknown_group", template=template["id"], group=", ".join(unknown),
                                       groups=", ".join(group_ids) or "-")
             chosen = set(groups)
-        messages = []
-        for msg in template["messages"]:
-            if msg.get("group") and msg["group"] not in chosen:
-                continue
-            msg = copy.deepcopy(msg)
-            msg.pop("group", None)
-            messages.append(msg)
+        def pick(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            out = []
+            for item in items:
+                if item.get("group") and item["group"] not in chosen:
+                    continue
+                item = copy.deepcopy(item)
+                item.pop("group", None)
+                out.append(item)
+            return out
+
+        messages = pick(template["messages"])
+        requests = pick(template.get("requests") or [])
         return {
+            "requests": requests,
+            "max_rate": template.get("max_rate", 10),
+            "active": False,  # a template never starts sending by itself
+            "allow_write": False,
             "name": name.strip() or text(template.get("default_name"), language) or template["id"],
             "interface": interface,
             "template": template["id"],

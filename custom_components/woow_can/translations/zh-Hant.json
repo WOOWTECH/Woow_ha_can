@@ -509,6 +509,54 @@
         }
       }
     },
+    "control_device": {
+      "name": "開關主動輪詢或寫入",
+      "description": "需要詢問才回答的設備（OBD-II、Daly BMS、CANopen SDO）只有在開啟「主動輪詢」時才送請求；有輸出（開關、數值、按鈕）的設備，要「允許寫入」才會出現這些實體並接受寫入。新建的裝置兩者都是關的。只有使用者要求、而且是使用者指的那條匯流排時才開啟：同一台設備不可以同時有別的主控在輪詢或控制。限管理員。",
+      "fields": {
+        "device": {
+          "name": "裝置",
+          "description": "名稱或 ID。"
+        },
+        "active": {
+          "name": "主動輪詢",
+          "description": "true：送出裝置的請求（有節制，每秒最多 max_rate 個，沒回應會放慢）；false：停止。"
+        },
+        "allow_write": {
+          "name": "允許寫入",
+          "description": "true：建立可寫的實體並接受 write_signal；false：移除它們。"
+        },
+        "note": {
+          "name": "備註",
+          "description": "為什麼要做，簡短說明；會顯示在活動紀錄。"
+        }
+      }
+    },
+    "write_signal": {
+      "name": "寫入訊號",
+      "description": "對允許寫入的裝置送出一個可寫訊號的值（繼電器輸出、設定值、模式、指令）：指令訊框以上次送出的內容為基礎，所以同一個訊框裡其他輸出會保持原值。get_device 會列出可寫的訊號（write）。只寫使用者要求的值。限管理員。",
+      "fields": {
+        "device": {
+          "name": "裝置",
+          "description": "名稱或 ID。"
+        },
+        "message": {
+          "name": "訊息",
+          "description": "訊號所在的訊息，例如 Outputs。"
+        },
+        "signal": {
+          "name": "訊號",
+          "description": "訊號名稱，例如 DO3。"
+        },
+        "value": {
+          "name": "數值",
+          "description": "用訊號單位的數字，或數值表裡的標籤（start、auto）。"
+        },
+        "note": {
+          "name": "備註",
+          "description": "為什麼要做，簡短說明；會顯示在活動紀錄。"
+        }
+      }
+    },
     "decode_frame": {
       "name": "解碼訊框",
       "description": "用介面上的裝置和附加的 DBC 檔解一筆訊框。要加 return_response: true。",

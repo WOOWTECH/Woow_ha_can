@@ -16,7 +16,16 @@ with known numbers:
   fast-packet (SOC 87 %, SOH 95 %, 600 min, 0.165 V), every 1.5 s.
 - CANopen node 5: heartbeat (operational) every second, silent for 10 s of every 60 (s 40-50); an
   emergency 0x8130 at s 20 of every 60, cleared (0000) at s 30.
-- OBD-II: answers 7DF 02 01 0C with 7E8 04 41 0C 1A F8 (1726 rpm).
+- OBD-II (Service 01, request 7DF): 7E8 answers PIDs 04 05 0C 0D 0F 11 2F 42 46 5E with the research's
+  example values (1726 rpm, 50 km/h, 83 degC ...), 7E9 (gearbox) answers 0D too; PID 5C gets no answer.
+- CANopen node 5 is also a CiA 402 drive: statusword on TPDO1 (0x185, every 200 ms; "operation enabled",
+  "fault" while its emergency is active) and an SDO server (0x605 / 0x585) for 6041, 6061 (3 = profile
+  velocity), 6064 (position, counting), 606C (1500 rpm), 6077 (50.0 %), 603F, 1000; other objects abort.
+- CANopen node 7, a CiA 401 I/O module: boot-up, then heartbeat; inputs on TPDO1 (0x187) only while
+  operational (NMT 000#01 07 or 000#01 00), DI0 toggling every 4 s and DI8-15 wired to DO0-7 (RPDO1 0x207);
+  analogue inputs by SDO (0x607 / 0x587, 6401:01-04 = 16383, -16383, a ramp, 0).
+- Daly BMS (29-bit, BMS 01 / host 40): answers 0x18<id>0140 with 0x18<id>4001 for 90 (52.5 V, +11.0 A,
+  85.0 %), 91, 92, 93 and 98.
 - A body controller for the reverse engineering tools: 0x3C0 at 10 Hz, byte 0 bit 2 = door open, bit 5 =
   light on, byte 1 a rolling counter, bytes 2-3 cabin temperature 21.5 degC (0.1 degC, little endian), byte 4
   the light level (0, or 80 while the light is on). "Pressing" happens over the bus: 6F0#xx sets the door
@@ -53,6 +62,21 @@ J1939 = {  # (priority, PGN) -> data; source address 00
 }
 
 
+OBD = {  # PID -> data bytes A (B), the research's example values
+    0x04: b"\x80", 0x05: b"\x7B", 0x0C: b"\x1A\xF8", 0x0D: b"\x32", 0x0F: b"\x46", 0x11: b"\x33",
+    0x2F: b"\xC0", 0x42: b"\x36\xB0", 0x46: b"\x41", 0x5E: b"\x00\xFA",
+}
+DALY = {  # data id -> reply data (big endian)
+    0x90: bytes.fromhex("020D020D759E0352"), 0x91: bytes.fromhex("0D16030CEE070000"),
+    0x92: bytes.fromhex("41013F0400000000"), 0x93: bytes.fromhex("0201016400 0186A0".replace(" ", "")),
+    0x98: bytes(8),
+}
+
+
+def sdo_value(cmd: int, index: int, sub: int, value: int, size: int) -> bytes:
+    return bytes([cmd, index & 0xFF, index >> 8, sub]) + (value & ((1 << (8 * size)) - 1)).to_bytes(4, "little")
+
+
 def frame(can_id: int, data: bytes) -> bytes:
     return struct.pack("=IB3x8s", can_id, len(data), data)
 
@@ -81,8 +105,9 @@ def main() -> None:
     sock.bind((ifname,))
     start = time.monotonic()
     next_1hz = next_50hz = next_20hz = next_10hz = next_2hz = next_n2k = start
-    next_body = start
+    next_body = next_402 = next_401 = start
     step = counter = sent = answered = n2k_seq = body_counter = body = 0
+    io_operational, io_do, io_booted = False, 0, False
     queue: list[tuple[float, bytes]] = []  # BAM data packets, 50 ms apart
 
     def send(can_id: int, data: bytes) -> None:
@@ -140,6 +165,19 @@ def main() -> None:
                 if pgn in (65265, 65266):
                     send(j1939_id(prio, pgn, 0x00), data)
             next_10hz += 0.1
+        if now >= next_402:  # CiA 402 statusword on TPDO1 of node 5
+            fault = 20 <= elapsed % 60 < 30
+            send(0x185, (0x0008 if fault else 0x0237).to_bytes(2, "little"))
+            next_402 += 0.2
+        if now >= next_401:  # CiA 401 node 7: boot-up, heartbeat, inputs while operational
+            if not io_booted:
+                send(0x707, b"\x00")
+                io_booted = True
+            elif int(elapsed * 2) % 2 == 0:
+                send(0x707, b"\x05" if io_operational else b"\x7f")
+            if io_operational:
+                send(0x187, bytes([0x01 if int(elapsed / 4) % 2 else 0x00, io_do & 0xFF]))
+            next_401 += 0.5
         if now >= next_body:
             body_counter = (body_counter + 1) & 0xFF
             light = bool(body & 2)
@@ -156,18 +194,54 @@ def main() -> None:
                 send(j1939_id(6, 127506, 0x23), data)
             n2k_seq = (n2k_seq + 1) & 7
             next_n2k += 1.5
-        wait = max(0.0, min([next_1hz, next_50hz, next_20hz, next_10hz, next_2hz, next_n2k, next_body]
+        wait = max(0.0, min([next_1hz, next_50hz, next_20hz, next_10hz, next_2hz, next_n2k, next_body, next_402,
+                             next_401]
                             + [d for d, _ in queue]) - time.monotonic())
         ready, _, _ = select.select([sock], [], [], wait)
         if ready:
             buf = sock.recv(16)
             raw, length = struct.unpack_from("=IB", buf)
             data = buf[8:8 + length]
-            if raw == 0x7DF and data[:3] == b"\x02\x01\x0c":
-                send(0x7E8, bytes.fromhex("04410C1AF8CCCCCC"))
-                answered += 1
+            if raw == 0x7DF and len(data) >= 3 and data[:2] == b"\x02\x01":
+                pid = data[2]
+                if pid in OBD:
+                    value = OBD[pid]
+                    send(0x7E8, (bytes([2 + len(value), 0x41, pid]) + value).ljust(8, b"\xcc"))
+                    answered += 1
+                    if pid == 0x0D:  # the gearbox answers the vehicle speed too
+                        send(0x7E9, (bytes([3, 0x41, pid]) + value).ljust(8, b"\xaa"))
             elif raw == 0x6F0 and data:
                 body = data[0] & 3
+            elif raw == 0x000 and len(data) >= 2 and data[1] in (0, 7):  # NMT for node 7
+                if data[0] == 0x01:
+                    io_operational = True
+                elif data[0] in (0x02, 0x80):
+                    io_operational = False
+            elif raw == 0x207 and data:
+                io_do = data[0] | (data[1] << 8 if len(data) > 1 else 0)
+            elif raw == 0x605 and len(data) >= 4 and data[0] == 0x40:  # SDO read, node 5 (CiA 402)
+                index, sub = data[1] | data[2] << 8, data[3]
+                fault = 20 <= elapsed % 60 < 30
+                objects = {(0x6041, 0): (0x4B, 0x0008 if fault else 0x0237, 2), (0x6061, 0): (0x4F, 3, 1),
+                           (0x6064, 0): (0x43, int(elapsed * 1000), 4), (0x606C, 0): (0x43, 1500, 4),
+                           (0x6077, 0): (0x4B, 500, 2), (0x603F, 0): (0x4B, 0x8130 if fault else 0, 2),
+                           (0x1000, 0): (0x43, 0x00020192, 4)}
+                if (index, sub) in objects:
+                    cmd, value, size = objects[(index, sub)]
+                    send(0x585, sdo_value(cmd, index, sub, value, size))
+                else:
+                    send(0x585, bytes([0x80, data[1], data[2], sub]) + (0x06020000).to_bytes(4, "little"))
+            elif raw == 0x607 and len(data) >= 4 and data[0] == 0x40:  # SDO read, node 7 (CiA 401)
+                index, sub = data[1] | data[2] << 8, data[3]
+                analog = {1: 16383, 2: -16383, 3: int(elapsed * 100) % 32768, 4: 0}
+                if index == 0x6401 and sub in analog:
+                    send(0x587, sdo_value(0x4B, index, sub, analog[sub], 2))
+                else:
+                    send(0x587, bytes([0x80, data[1], data[2], sub]) + (0x06020000).to_bytes(4, "little"))
+            elif raw & EFF and (raw & 0x1F00FFFF) == 0x18000140:  # Daly request: 18 <id> 01 (BMS) 40 (host)
+                data_id = (raw >> 16) & 0xFF
+                if data_id in DALY:
+                    send(EFF | 0x18004001 | data_id << 16, DALY[data_id])
     print(f"sent {sent} frames, answered {answered} OBD requests in {time.monotonic() - start:.1f} s")
 
 

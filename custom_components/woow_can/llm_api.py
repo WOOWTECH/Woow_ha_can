@@ -28,7 +28,7 @@ READ_ONLY = {"describe", "list_interfaces", "get_monitor", "get_trace", "get_act
              "list_databases", "bit_activity", "find_signal", "guided_capture"}
 STEPS = {"find_signal", "guided_capture"}  # change nothing outside, but each call moves the search / capture on
 REPLACES = {"save_periodic", "control_periodic", "clear_monitor", "save_device", "delete_device", "set_signal",
-            "attach_dbc"}  # overwrite, stop or remove what is there
+            "attach_dbc", "control_device"}  # overwrite, stop or remove what is there
 IDEMPOTENT = (READ_ONLY - STEPS) | REPLACES
 # Hints in the service texts that are for direct service calls; a tool always asks for the response.
 _SERVICE_HINTS = (" Call it with return_response: true.", " Add return_response: true to get the result.")
@@ -40,8 +40,10 @@ PROMPT = (
     "equipment (batteries, J1939 engines, NMEA 2000, CANopen). For unknown frames: guided_capture (idle, "
     "action, finish) shows which bits an action changes, find_signal finds the field holding a value a "
     "person reads off a display, bit_activity and test_signal check a field, add_signal makes it an "
-    "entity. Sending needs an admin and an interface that is not listen-only; never send to vehicles or "
-    "machinery unless the user asked for that exact frame. Give every change a short note in the language "
+    "entity. Equipment that must be asked (OBD-II cars, Daly BMS, CANopen SDO) is read only after "
+    "control_device turns polling on; outputs exist only after it allows writing (write_signal) - both only "
+    "when the user asked. Sending needs an admin and an interface that is not listen-only; never send to "
+    "vehicles or machinery unless the user asked for that exact frame. Give every change a short note in the language "
     "the user speaks with you: people review the changes in the activity log of the WOOW CAN panel."
 )
 

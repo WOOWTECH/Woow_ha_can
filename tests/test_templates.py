@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from custom_components.woow_can.devices import Device
 from custom_components.woow_can.managed import UNITS, platform_of, snake
 from custom_components.woow_can.signals import Message
 from custom_components.woow_can.templates import TemplateLibrary, defaults, validate
@@ -32,7 +33,10 @@ def test_template_is_complete(tid):
     validate(template)
     for key in ("source", "license", "verified", "confidence", "name", "description", "default_name"):
         assert template.get(key), key
-    assert template["transmits"] is False  # the first templates only listen
+    if template["transmits"]:  # sends: requests or command frames, all off until a person turns them on
+        assert template.get("requests") or any(m.get("send") for m in template["messages"])
+    else:
+        assert not template.get("requests") and not any(m.get("send") for m in template["messages"])
     keys = set()
     for msg in messages(tid).values():
         for sig in msg.signals:
@@ -161,4 +165,90 @@ def test_instantiate_groups_and_params():
     with pytest.raises(ValueError):
         lib.instantiate(bms, "entry", "", None, ["nope"], "en")
     assert lib.get("J1939 engine and vehicle")["id"] == "j1939_engine_vehicle"
-    assert {t["id"] for t in lib.summaries("en", "vehicle")} == {"j1939_engine_vehicle", "j1939_dm1"}
+    assert {t["id"] for t in lib.summaries("en", "vehicle")} == {"j1939_engine_vehicle", "j1939_dm1", "obd2_mode01"}
+
+
+def device_from(tid: str, **params) -> Device:
+    lib = TemplateLibrary(_Hass())
+    lib.templates = TEMPLATES
+    raw = lib.instantiate(lib.get(tid), "entry", "", params or None, None, "en")
+    assert raw["active"] is False and raw["allow_write"] is False  # a template never starts sending by itself
+    return Device.from_dict(raw)
+
+
+def test_obd2_mode01():
+    m = messages("obd2_mode01")
+    rpm = m["PID_0C"]
+    assert rpm.matches(0x7E8, fb("04 41 0C 1A F8 CC CC CC")) and not rpm.matches(0x7E8, fb("03 41 0D 32 CC CC CC CC"))
+    assert rpm.decode(fb("04 41 0C 1A F8 CC CC CC")) == {"EngineSpeed": 1726}
+    assert m["PID_0D"].matches(0x7E9, fb("03 41 0D 32 AA AA AA AA"))  # the gearbox ECU answers too
+    assert m["PID_0D"].decode(fb("03 41 0D 32 CC CC CC CC")) == {"VehicleSpeed": 50}
+    assert m["PID_05"].decode(fb("03 41 05 7B CC CC CC CC")) == {"CoolantTemperature": 83}
+    assert m["PID_05"].decode(fb("03 41 05 46 00 00 00 00")) == {"CoolantTemperature": 30}  # ELM327 example
+    assert m["PID_0F"].decode(fb("03 41 0F 46 CC CC CC CC")) == {"IntakeAirTemperature": 30}
+    assert m["PID_11"].decode(fb("03 41 11 33 CC CC CC CC"))["ThrottlePosition"] == pytest.approx(20, abs=0.01)
+    assert m["PID_2F"].decode(fb("03 41 2F C0 CC CC CC CC"))["FuelLevel"] == pytest.approx(75.2941, abs=0.001)
+    assert m["PID_42"].decode(fb("04 41 42 36 B0 CC CC CC")) == {"ModuleVoltage": 14}
+    assert m["PID_5E"].decode(fb("04 41 5E 00 FA CC CC CC")) == {"FuelRate": 12.5}
+    assert not rpm.matches(0x7E8, fb("03 7F 01 21 CC CC CC CC"))  # negative response: not a value
+    device = device_from("obd2_mode01")
+    first = device.requests[0]
+    assert (first.raw_id, first.data, first.reply) == (0x7DF, fb("02 01 0C CC CC CC CC CC"), "PID_0C")
+    assert sum(1000 / r.period_ms for r in device.requests) < 10  # polite: under 10 requests a second
+    wide = device_from("obd2_mode01", request_id="18DB33F1", reply_id="18DAF100", reply_mask="1FFFFF00")
+    assert wide.requests[0].raw_id == 0x18DB33F1 | EFF
+    assert wide.message("PID_0C").matches(0x18DAF110 | EFF, fb("04 41 0C 0F A0 CC CC CC"))
+    assert wide.message("PID_0C").decode(fb("04 41 0C 0F A0 CC CC CC")) == {"EngineSpeed": 1000}
+
+
+def test_daly_bms():
+    device = device_from("daly_bms")
+    pack = device.message("Pack_90")
+    assert pack.raw_id == 0x18904001 | EFF
+    values = pack.decode(fb("02 0D 02 0D 75 9E 03 52"))
+    assert (values["TotalVoltage"], values["Current"], values["SOC"]) == (52.5, 11.0, 85.0)
+    assert values["Power"] == 577.5
+    assert [(r.raw_id, r.data) for r in device.requests[:1]] == [(0x18900140 | EFF, bytes(8))]
+    cells = device.message("Cells_91").decode(fb("0D 16 03 0C EE 07 00 00"))
+    assert (cells["MaxCellVoltage"], cells["MinCellVoltage"], cells["CellDelta"]) == (3.35, 3.31, 40.0)
+    temps = device.message("Temperatures_92").decode(fb("41 01 3F 04 00 00 00 00"))
+    assert (temps["MaxTemperature"], temps["MinTemperature"]) == (25, 23)
+    mos = device.message("Mos_93").decode(fb("02 01 01 64 00 01 86 A0"))
+    assert (mos["State"], mos["ChargeMos"], mos["RemainingCapacity"]) == ("discharging", 1, 100.0)
+    assert device.message("Faults_98").decode(bytes(8))["Fault"] == 0
+
+
+def test_cia401_io():
+    device = device_from("cia401_io", node_id=1)
+    inputs = device.message("Inputs").decode(fb("37 00"))  # CAN-2053C manual
+    assert [i for i in range(16) if inputs[f"DI{i}"]] == [0, 1, 2, 4, 5]
+    outputs = device.message("Outputs")
+    assert outputs.send and outputs.raw_id == 0x201
+    assert outputs.build({"DO0": 1, "DO1": 1, "DO2": 1, "DO4": 1, "DO5": 1}) == fb("37 00")  # CAN-2057C manual
+    assert device_from("cia401_io", node_id=5).message("NMT").build({"Command": "start"}) == fb("01 05")
+    ai = device.message("AI1_SDO")
+    assert ai.matches(0x581, fb("4B 01 64 01 FF 7F D2 23")) and ai.decode(fb("4B 01 64 01 FF 7F D2 23")) == {"AI1": 32767}
+    assert not ai.matches(0x581, fb("4B 01 64 02 FF 7F 00 00"))  # sub-index 2
+    assert not ai.matches(0x581, fb("80 01 64 01 00 00 02 06"))  # an abort
+    read = device.requests[0]
+    assert (read.raw_id, read.data, read.reply) == (0x601, fb("40 01 64 01 00 00 00 00"), "AI1_SDO")
+    assert not any(platform_of(s) == "switch" for _m, s in device.adopted())  # writing is off
+    device.allow_write = True
+    assert sum(platform_of(s) == "switch" for _m, s in device.adopted()) == 16
+    assert any(platform_of(s) == "button" for _m, s in device.adopted())
+
+
+def test_cia402_drive_monitor():
+    device = device_from("cia402_drive_monitor", node_id=1)
+    tpdo = device.message("Statusword_TPDO1")
+    for word, state in ((0x0237, "operation_enabled"), (0x0008, "fault"), (0x0040, "switch_on_disabled"),
+                        (0x0021, "ready_to_switch_on"), (0x0023, "switched_on"), (0x0007, "quick_stop_active"),
+                        (0x000F, "fault_reaction_active"), (0x0000, "not_ready_to_switch_on")):
+        assert tpdo.decode(word.to_bytes(2, "little"))["State"] == state, hex(word)
+    assert tpdo.decode(fb("08 00"))["Fault"] == 1 and tpdo.decode(fb("37 02"))["Fault"] == 0
+    assert device.message("Position_SDO").decode(fb("43 64 60 00 18 FC FF FF")) == {"PositionActual": -1000}
+    assert device.message("Torque_SDO").decode(fb("4B 77 60 00 F4 01 00 00")) == {"TorqueActual": 50.0}
+    sdo = device.message("Statusword_SDO").decode(fb("4B 41 60 00 37 02 00 00"))
+    assert sdo["SdoState"] == "operation_enabled"
+    assert device.message("Mode_SDO").decode(fb("4F 61 60 00 03 00 00 00")) == {"ModeDisplay": "profile_velocity"}
+    assert not device.writable and all(not m.send for m in device.messages)  # it only reads

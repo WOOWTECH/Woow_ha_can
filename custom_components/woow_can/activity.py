@@ -43,6 +43,8 @@ MESSAGES = {
     "device_save_failed": 'could not save device "{device}": {error}',
     "signal_changed": '{device}: changed signal {signal}',
     "signal_added": '{device}: added signal {signal}',
+    "signal_written": '{device}: wrote {signal} = {value}',
+    "device_options": '{device}: requests {active}, writing {allow_write}',
     "dbc_imported": "imported {file} ({messages} messages)",
     "dbc_attached": "{file} decodes {ports}",
     "dbc_deleted": "deleted {file}",

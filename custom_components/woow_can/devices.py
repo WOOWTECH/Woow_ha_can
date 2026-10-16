@@ -9,7 +9,8 @@ data changed, and hands values to the entities, which decide when to write (see 
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import logging
 import time
@@ -17,12 +18,15 @@ from typing import Any
 import uuid
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, LIVE_PUSH
+from .can_port import CanFrame
+from .const import DOMAIN
+from .polling import RequestScheduler
 from .signals import (
     EFF_FLAG,
     J1939_TP_CM,
@@ -31,17 +35,69 @@ from .signals import (
     FastPacket,
     J1939Transport,
     Message,
+    Signal,
+    frame_data,
     j1939_pgn,
+    number,
+    parse_can_id,
 )
 
 _LOGGER = logging.getLogger(__name__)
 SAVE_DELAY = 5
 TIMEOUT_CHECK = 1.0  # s between checks for silent messages
 VALUES_PUSH = 0.25  # s between value pushes to the panel
+MIN_PERIOD_MS = 100  # shortest request period
+MAX_DEVICE_RATE = 50.0  # requests a second a device may be allowed
+WRITE_GAP = 0.05  # s between two writes of the same command frame
 
 
 def new_id() -> str:
     return uuid.uuid4().hex[:12]
+
+
+@dataclass
+class Request:
+    """A frame sent every period_ms while the device is active; `reply` names the message that answers it."""
+
+    name: str
+    can_id: int
+    extended: bool
+    data: bytes
+    period_ms: int
+    reply: str | None = None
+    timeout_ms: int = 300
+
+    @property
+    def raw_id(self) -> int:
+        return self.can_id | EFF_FLAG if self.extended else self.can_id
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any], params: dict[str, Any]) -> Request:
+        try:
+            can_id, extended = parse_can_id(raw["can_id"], params, raw.get("extended"))
+            data = frame_data(raw.get("data", ""), params)
+            period = number(raw.get("period_ms", 1000), params)
+            timeout = number(raw.get("timeout_ms", 300), params)
+        except (KeyError, TypeError, ValueError) as err:
+            if isinstance(err, DefinitionError):
+                raise
+            raise DefinitionError("bad_request", request=raw.get("name", "?"), error=str(err)) from err
+        if len(data) > 8:
+            raise DefinitionError("bad_request", request=raw.get("name", "?"), error="at most 8 bytes")
+        if not MIN_PERIOD_MS <= period <= 3_600_000 or not 10 <= timeout <= 10_000:
+            raise DefinitionError("bad_request", request=raw.get("name", "?"),
+                                  error=f"period_ms {MIN_PERIOD_MS}-3600000, timeout_ms 10-10000")
+        return cls(name=str(raw.get("name") or f"{can_id:X}"), can_id=can_id, extended=extended, data=data,
+                   period_ms=period, reply=raw.get("reply") or None, timeout_ms=timeout)
+
+    def as_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"name": self.name,
+                               "can_id": f"{self.can_id:08X}" if self.extended else f"{self.can_id:03X}",
+                               "extended": self.extended, "data": self.data.hex(" ").upper(),
+                               "period_ms": self.period_ms, "timeout_ms": self.timeout_ms}
+        if self.reply:
+            out["reply"] = self.reply
+        return out
 
 
 @dataclass
@@ -57,6 +113,10 @@ class Device:
     model: str = ""
     source: str = ""  # "template", "dbc:<file>", "custom"
     created: float = 0.0
+    requests: list[Request] = field(default_factory=list)
+    active: bool = False  # sends its requests (off until someone turns it on)
+    allow_write: bool = False  # has writable entities and accepts writes (off until someone turns it on)
+    max_rate: float = 10.0  # requests a second at most
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Device:
@@ -64,29 +124,110 @@ class Device:
             raise DefinitionError("no_name")
         if not raw.get("interface"):
             raise DefinitionError("no_interface")
-        messages = [Message.from_dict(m, raw.get("params") or {}) for m in raw.get("messages") or []]
+        params = raw.get("params") or {}
+        messages = [Message.from_dict(m, params) for m in raw.get("messages") or []]
         if not messages:
             raise DefinitionError("no_messages")
         names = [m.name for m in messages]
         if len(set(names)) != len(names):
             raise DefinitionError("duplicate_message")
+        requests = [Request.from_dict(r, params) for r in raw.get("requests") or []]
+        by_name = {m.name: m for m in messages}
+        if len({r.name for r in requests}) != len(requests):
+            raise DefinitionError("duplicate_request")
+        for req in requests:
+            if req.reply and (req.reply not in by_name or by_name[req.reply].send):
+                raise DefinitionError("unknown_reply", request=req.name, message=req.reply)
+        for msg in messages:
+            for sig in msg.signals:
+                write_check(msg, sig, by_name)
+        try:
+            max_rate = float(raw.get("max_rate", 10.0))
+        except (TypeError, ValueError) as err:
+            raise DefinitionError("bad_max_rate", value=raw.get("max_rate")) from err
+        if not 0.1 <= max_rate <= MAX_DEVICE_RATE:
+            raise DefinitionError("bad_max_rate", value=max_rate)
         return cls(id=str(raw.get("id") or new_id()), name=str(raw["name"]).strip(), interface=str(raw["interface"]),
-                   messages=messages, template=raw.get("template"), params=dict(raw.get("params") or {}),
+                   messages=messages, template=raw.get("template"), params=dict(params),
                    groups=list(raw.get("groups") or []), manufacturer=str(raw.get("manufacturer") or ""),
                    model=str(raw.get("model") or ""), source=str(raw.get("source") or "custom"),
-                   created=float(raw.get("created") or 0))
+                   created=float(raw.get("created") or 0), requests=requests, active=bool(raw.get("active", False)),
+                   allow_write=bool(raw.get("allow_write", False)), max_rate=max_rate)
 
     def as_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "name": self.name, "interface": self.interface, "template": self.template,
-                "params": self.params, "groups": self.groups, "manufacturer": self.manufacturer,
-                "model": self.model, "source": self.source, "created": self.created,
-                "messages": [m.as_dict() for m in self.messages]}
+        out = {"id": self.id, "name": self.name, "interface": self.interface, "template": self.template,
+               "params": self.params, "groups": self.groups, "manufacturer": self.manufacturer,
+               "model": self.model, "source": self.source, "created": self.created,
+               "messages": [m.as_dict() for m in self.messages]}
+        if self.requests:
+            out["requests"] = [r.as_dict() for r in self.requests]
+            out["max_rate"] = self.max_rate
+        if self.active:
+            out["active"] = True
+        if self.allow_write:
+            out["allow_write"] = True
+        return out
 
     def message(self, name: str) -> Message | None:
         return next((m for m in self.messages if m.name == name), None)
 
+    @property
+    def writable(self) -> bool:
+        return any(is_write(s) for m in self.messages for s in m.signals)
+
     def adopted(self) -> list[tuple[Message, Any]]:
-        return [(m, s) for m in self.messages for s in m.signals if s.entity]
+        """Signals with an entity; writable ones only while writing is allowed."""
+        return [(m, s) for m in self.messages for s in m.signals if s.entity and (self.allow_write or not is_write(s))]
+
+
+WRITE_PLATFORMS = ("number", "select", "switch", "button")
+
+
+def write_view(sig: Signal) -> dict[str, Any]:
+    """What the panel needs to offer a control for a writable signal."""
+    entity = sig.entity or {}
+    out: dict[str, Any] = {"platform": entity["platform"]}
+    if entity["platform"] == "number":
+        out.update({"min": entity.get("min", sig.minimum), "max": entity.get("max", sig.maximum),
+                    "step": entity.get("step", sig.factor)})
+    elif entity["platform"] == "select":
+        out["options"] = list(sig.values.values())
+    elif entity["platform"] == "button":
+        out["press"] = entity["press"]
+    elif entity["platform"] == "switch":
+        out.update({"on": entity.get("on", 1), "off": entity.get("off", 0)})
+    return out
+
+
+def is_write(sig: Signal) -> bool:
+    return (sig.entity or {}).get("platform") in WRITE_PLATFORMS
+
+
+def write_target(msg: Message, sig: Signal, by_name: dict[str, Message]) -> tuple[Message, Signal]:
+    """Where a writable signal's value goes: its own message when that is sent, else entity.write {message, signal}
+    (a status signal that shows what a command message set)."""
+    if msg.send:
+        return msg, sig
+    spec = (sig.entity or {}).get("write") or {}
+    target = by_name.get(spec.get("message", ""))
+    tsig = target.by_name.get(spec.get("signal", sig.name)) if target is not None else None
+    if target is None or not target.send or tsig is None:
+        raise DefinitionError("no_write_target", message=msg.name, signal=sig.name)
+    return target, tsig
+
+
+def write_check(msg: Message, sig: Signal, by_name: dict[str, Message]) -> None:
+    if not is_write(sig):
+        return
+    entity = sig.entity or {}
+    target, tsig = write_target(msg, sig, by_name)
+    platform = entity["platform"]
+    if platform == "number" and None in (entity.get("min", tsig.minimum), entity.get("max", tsig.maximum)):
+        raise DefinitionError("number_needs_range", signal=sig.name)
+    if platform == "select" and not tsig.values:
+        raise DefinitionError("select_needs_values", signal=sig.name)
+    if platform == "button" and "press" not in entity:
+        raise DefinitionError("button_needs_press", signal=sig.name)
 
 
 @dataclass
@@ -123,6 +264,15 @@ class DeviceManager:
         self._timeout_unsub: CALLBACK_TYPE | None = None
         self.on_frames_routed: Callable[[str], None] | None = None
         self.version = 0  # bumps whenever devices change
+        # sending, set by the admin layer: why an interface cannot send now (None = it can), and a sender
+        self.cannot_send: Callable[[str], str | None] = lambda _entry_id: "not connected"
+        self.sender: Callable[[str, CanFrame], Awaitable[Any]] | None = None
+        self.on_written: Callable[[Device, str, str, Any, Context | None], None] | None = None
+        self.scheduler = RequestScheduler(hass, self)
+        self._written: dict[tuple[str, str], bytes] = {}  # (device, sent message) -> its last data
+        self._write_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._write_at: dict[tuple[str, str], float] = {}
+        self._status_marks: dict[str, tuple[Any, ...]] = {}
 
     # ---- persistence / lifecycle --------------------------------------------------------
     async def async_load(self) -> None:
@@ -150,9 +300,11 @@ class DeviceManager:
 
         self._timeout_unsub = async_track_time_interval(self.hass, self._check_timeouts,
                                                         timedelta(seconds=TIMEOUT_CHECK))
+        self.scheduler.start()
 
     @callback
     def stop(self) -> None:
+        self.scheduler.stop()
         if self._timeout_unsub is not None:
             self._timeout_unsub()
             self._timeout_unsub = None
@@ -168,6 +320,8 @@ class DeviceManager:
         for device in self.devices.values():
             idx = index.setdefault(device.interface, _Index())
             for msg in device.messages:
+                if msg.send:
+                    continue  # frames this integration sends are not decoded
                 if msg.pgn is not None:
                     idx.by_pgn.setdefault(msg.pgn, []).append((device, msg))
                     if msg.transport == "j1939_tp" and idx.tp is None:
@@ -180,6 +334,7 @@ class DeviceManager:
                 else:
                     idx.masked.append((device, msg))
         self._index = index
+        self.scheduler.refresh()
 
     def interfaces_in_use(self) -> set[str]:
         return set(self._index)
@@ -222,6 +377,8 @@ class DeviceManager:
     def _decode(self, device: Device, msg: Message, data: bytes) -> None:
         key = (device.id, msg.name)
         now = time.monotonic()
+        if device.active:
+            self.scheduler.on_message(device.id, msg.name)
         first = key not in self.last_seen
         self.last_seen[key] = now
         if self._last_data.get(key) == data and not first:
@@ -262,6 +419,15 @@ class DeviceManager:
         now = time.monotonic()
         for entity in list(self._entities.values()):
             entity.check_timeout(now)
+        changed = []
+        for device in self.devices.values():  # the panel's "receiving / silent / never seen" per message
+            mark = tuple((self.last_seen.get((device.id, m.name)) is not None, self.is_fresh(device.id, m, now))
+                         for m in device.messages if not m.send)
+            if self._status_marks.get(device.id, mark) != mark:
+                changed.append(device)
+            self._status_marks[device.id] = mark
+        if changed and self._feed:
+            self._push("devices", {"devices": [self.device_view(d) for d in changed], "removed": []})
 
     def is_fresh(self, device_id: str, message: Message, now: float | None = None) -> bool | None:
         """True / False when the message has a timeout; None when it has none (event-type messages)."""
@@ -272,6 +438,70 @@ class DeviceManager:
         if seen is None:
             return False
         return (now if now is not None else time.monotonic()) - seen <= timeout
+
+    # ---- sending -------------------------------------------------------------------------
+    async def async_send(self, entry_id: str, frame: CanFrame) -> None:
+        if self.sender is None:
+            raise HomeAssistantError("the interface is not loaded")
+        await self.sender(entry_id, frame)
+
+    @callback
+    def push_requests(self) -> None:
+        if self._feed and self.scheduler.by_device:
+            self._push("requests", {"requests": {d: self.scheduler.status(d) for d in self.scheduler.by_device}})
+
+    def seed_written(self, device_id: str, message: str, signal: str, value: Any) -> None:
+        """A restored entity's last value, so the first write after a restart keeps the other signals of a shared
+        command frame (eight relay outputs in one byte)."""
+        device = self.devices.get(device_id)
+        msg = device.message(message) if device else None
+        if msg is None or not msg.send or signal not in msg.by_name:
+            return
+        key = (device_id, message)
+        try:
+            self._written[key] = msg.build({signal: value}, self._written.get(key))
+        except DefinitionError:
+            return
+        self.values.setdefault(device_id, {})[f"{message}.{signal}"] = value
+
+    async def async_write(self, device_id: str, message: str, signal: str, value: Any,
+                          context: Context | None = None) -> bytes:
+        """Write one signal: build its command frame over the last one sent and send it."""
+        device = self.devices.get(device_id)
+        if device is None:
+            raise DefinitionError("unknown_device", device=device_id)
+        if not device.allow_write:
+            raise DefinitionError("write_not_allowed", device=device.name)
+        msg = device.message(message)
+        sig = msg.by_name.get(signal) if msg is not None else None
+        if msg is None or sig is None:
+            raise DefinitionError("unknown_signal", device=device.name, signal=f"{message}.{signal}")
+        target, tsig = write_target(msg, sig, {m.name: m for m in device.messages})
+        entity = sig.entity or {}
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            low, high = entity.get("min", tsig.minimum), entity.get("max", tsig.maximum)
+            if (low is not None and value < low) or (high is not None and value > high):
+                raise DefinitionError("out_of_range", signal=sig.name, value=value, minimum=low, maximum=high)
+        key = (device.id, target.name)
+        lock = self._write_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            wait = self._write_at.get(key, 0.0) + WRITE_GAP - time.monotonic()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            data = target.build({tsig.name: value}, self._written.get(key))
+            await self.async_send(device.interface, CanFrame.from_raw(target.raw_id, data, 0))
+            self._written[key] = data
+            self._write_at[key] = time.monotonic()
+        full = f"{target.name}.{tsig.name}"
+        if target is msg:  # no feedback message: what was sent is the state
+            self.values.setdefault(device.id, {})[full] = value
+            self._queue_push(device.id, {full: value})
+            live = self._entities.get(f"{device.id}_{msg.name}_{sig.name}")
+            if live is not None:
+                live.on_value(value, True)
+        if self.on_written is not None:
+            self.on_written(device, message, signal, value, context)
+        return data
 
     # ---- panel feed ----------------------------------------------------------------------
     @callback
@@ -378,15 +608,21 @@ class DeviceManager:
                 platform = platform_of(sig)
                 entity_id = registry.async_get_entity_id(platform, DOMAIN, uid) if sig.entity else None
                 row = registry.async_get(entity_id) if entity_id else None
-                signals.append({"name": sig.name, "value": values.get(f"{msg.name}.{sig.name}"), "unit": sig.unit,
-                                "adopted": bool(sig.entity), "entity_id": entity_id, "platform": platform,
-                                "disabled": bool(row and row.disabled_by)})
+                row_view = {"name": sig.name, "value": values.get(f"{msg.name}.{sig.name}"), "unit": sig.unit,
+                            "adopted": bool(sig.entity), "entity_id": entity_id, "platform": platform,
+                            "disabled": bool(row and row.disabled_by)}
+                if is_write(sig):
+                    row_view["write"] = write_view(sig)
+                signals.append(row_view)
             messages.append({"name": msg.name, "id": msg.label(), "seen_s_ago": None if seen is None else
-                             round(now - seen, 1), "fresh": self.is_fresh(device.id, msg, now), "signals": signals})
+                             round(now - seen, 1), "fresh": self.is_fresh(device.id, msg, now), "signals": signals,
+                             "send": msg.send})
         out = {"id": device.id, "name": device.name, "interface": device.interface, "template": device.template,
                "source": device.source, "manufacturer": device.manufacturer, "model": device.model,
                "params": device.params, "groups": device.groups, "status": messages,
-               "extra": self.extra.get(device.id, {})}
+               "extra": self.extra.get(device.id, {}), "active": device.active, "allow_write": device.allow_write,
+               "has_requests": bool(device.requests), "writable": device.writable,
+               "requests": self.scheduler.status(device.id)}
         if with_definition:
             out["definition"] = device.as_dict()
         return out
@@ -418,6 +654,9 @@ class DeviceManager:
         if device is None:
             return None
         self._forget(device_id)
+        for key in [k for k in self._written if k[0] == device_id]:  # kept across edits, not past a delete
+            self._written.pop(key, None)
+        self._status_marks.pop(device_id, None)
         self._reindex()
         self._store.async_delay_save(self._data, SAVE_DELAY)
         await self._async_rebuild(None, device_id)
@@ -437,6 +676,7 @@ class DeviceManager:
             self.last_seen.pop(key, None)
         self.values.pop(device_id, None)
         self.extra.pop(device_id, None)
+        self._status_marks[device_id] = ()  # the panel was just sent "never seen": the next check sends the truth
 
     def _update_registry_device(self, device: Device) -> None:
         registry = dr.async_get(self.hass)

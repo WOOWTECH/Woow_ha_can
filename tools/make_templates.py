@@ -555,7 +555,375 @@ CANOPEN = {
     ],
 }
 
-TEMPLATES = [BMS, ENGINE, DM1, N2K, CANOPEN]
+# ---- 6. OBD-II Mode 01 (asks the car: ISO 15765-4 / SAE J1979) -------------------------------------------
+# (pid, signal, bytes, factor, offset, unit, period_ms, entity key, en, zh, enabled)
+OBD_PIDS = [
+    (0x0C, "EngineSpeed", 2, 0.25, 0, "rpm", 500, "engine.speed", "Engine speed", "引擎轉速", True),
+    (0x0D, "VehicleSpeed", 1, 1, 0, "km/h", 500, "vehicle.speed", "Vehicle speed", "車速", True),
+    (0x04, "EngineLoad", 1, 100 / 255, 0, "%", 2000, "engine.load", "Engine load", "引擎負載", False),
+    (0x11, "ThrottlePosition", 1, 100 / 255, 0, "%", 1000, "engine.throttle", "Throttle position", "節氣門開度", False),
+    (0x05, "CoolantTemperature", 1, 1, -40, "°C", 5000, "engine.coolant_temperature", "Coolant temperature",
+     "冷卻液溫度", True),
+    (0x0F, "IntakeAirTemperature", 1, 1, -40, "°C", 10000, "engine.intake_air_temperature", "Intake air temperature",
+     "進氣溫度", False),
+    (0x2F, "FuelLevel", 1, 100 / 255, 0, "%", 20000, "vehicle.fuel_level", "Fuel level", "油量", True),
+    (0x42, "ModuleVoltage", 2, 0.001, 0, "V", 5000, "vehicle.module_voltage", "Control module voltage",
+     "控制模組電壓", True),
+    (0x46, "AmbientTemperature", 1, 1, -40, "°C", 20000, "vehicle.ambient_temperature", "Ambient temperature",
+     "外氣溫度", False),
+    (0x5C, "OilTemperature", 1, 1, -40, "°C", 10000, "engine.oil_temperature", "Engine oil temperature", "機油溫度",
+     False),
+    (0x5E, "FuelRate", 2, 0.05, 0, "L/h", 2000, "engine.fuel_rate", "Fuel rate", "油耗", False),
+]
+
+
+def obd_messages() -> list[dict]:
+    out = []
+    for pid, name, size, factor, offset, unit, period, key, en, zh, enabled in OBD_PIDS:
+        out.append({"name": f"PID_{pid:02X}", "can_id": "reply_id", "id_mask": "reply_mask", "length": 8,
+                    "cycle_ms": period, "filters": [{"byte": 1, "value": "0x41"}, {"byte": 2, "value": f"0x{pid:02X}"}],
+                    "comment": f"Service 01 PID {pid:02X}: A{' * 256 + B' if size == 2 else ''}",
+                    "signals": [sig(name, 31, 8 * size, order="big", factor=round(factor, 12), offset=offset, unit=unit,
+                                    entity=ent(key, en, zh, enabled=enabled,
+                                                precision=1 if unit == "%" else None))]})
+    return out
+
+
+def obd_requests() -> list[dict]:
+    return [{"name": f"PID {pid:02X}", "can_id": "request_id", "data": ["0x02", "0x01", f"0x{pid:02X}", "0xCC", "0xCC",
+                                                                        "0xCC", "0xCC", "0xCC"],
+             "period_ms": period, "reply": f"PID_{pid:02X}", "timeout_ms": 200}
+            for pid, _n, _s, _f, _o, _u, period, *_ in OBD_PIDS]
+
+
+OBD = {
+    "id": "obd2_mode01",
+    "version": 1,
+    "name": T("OBD-II live data (Service 01)", "OBD-II 即時資料（Service 01）"),
+    "category": "vehicle",
+    "description": T(
+        "Cars and light vans through the OBD-II socket (pins 6 and 14): engine speed, vehicle speed, temperatures, "
+        "fuel level, module voltage, asked for over ISO 15765-4. The car only answers questions, so this template "
+        "sends requests — only after you turn on polling for the device. It never clears fault codes.",
+        "經 OBD-II 接頭（6、14 腳）讀汽車和輕型車：引擎轉速、車速、溫度、油量、模組電壓，依 ISO 15765-4 詢問取得。"
+        "車輛只回答問題，所以這個範本會送出請求——要在裝置上開啟「主動輪詢」後才會送。不會清除故障碼。"),
+    "bitrate": 500000,
+    "transmits": True,
+    "manufacturer": "OBD-II",
+    "model": "SAE J1979 / ISO 15765-4",
+    "default_name": T("Car", "汽車"),
+    "source": ["ISO 15765-4:2005 (public.resource.org edition)", "Wikipedia: OBD-II PIDs (CC BY-SA 4.0)",
+               "ELM327 data sheet (example frames)", "CSS Electronics OBD2 DBC v1.3 (MIT; start bits)"],
+    "license": "Facts from public documents, written by WOOWTECH; MIT",
+    "verified": ["Example requests and responses from Wikipedia and the ELM327 data sheet, decoded both by the "
+                 "J1979 formulas and the DBC signals"],
+    "confidence": "high",
+    "notes": T("Polite polling: one request at a time, about 6.7 a second in all; PIDs the car does not have get no "
+               "answer and are asked again only every minute. Most cars use 500 kbit/s and 11-bit IDs; for 29-bit "
+               "cars set request_id 18DB33F1, reply_id 18DAF100, reply_mask 1FFFFF00. Many new cars have a gateway "
+               "that only answers OBD requests: listening alone shows nothing there.",
+               "有禮貌的輪詢：一次一個請求，合計每秒約 6.7 個；車子沒有的 PID 不會回答，之後每分鐘才再問一次。大多數車是 "
+               "500 kbit/s、11-bit ID；29-bit 的車把 request_id 設 18DB33F1、reply_id 18DAF100、reply_mask 1FFFFF00。"
+               "很多新車有閘道，只回 OBD 請求，單純監聽看不到東西。"),
+    "params": [
+        {"key": "request_id", "default": "7DF",
+         "description": T("Request ID (7DF = all OBD ECUs, 7E0 = engine only)", "請求 ID（7DF＝所有 OBD ECU、7E0＝只問引擎）")},
+        {"key": "reply_id", "default": "7E8", "description": T("Reply ID", "回覆 ID")},
+        {"key": "reply_mask", "default": "7F8",
+         "description": T("Reply ID mask (7F8 = any of 7E8-7EF)", "回覆 ID 遮罩（7F8＝7E8–7EF 都收）")},
+    ],
+    "groups": [],
+    "max_rate": 10,
+    "messages": obd_messages(),
+    "requests": obd_requests(),
+}
+
+
+# ---- 7. Daly BMS, native CAN (asks the BMS) ------------------------------------------------------------
+def daly_id(data_id: int, reply: bool) -> str:
+    return (f"0x18{data_id:02X}0000 | (host_address << 8) | bms_address" if reply
+            else f"0x18{data_id:02X}0000 | (bms_address << 8) | host_address")
+
+
+DALY = {
+    "id": "daly_bms",
+    "version": 1,
+    "name": T("Daly BMS (native CAN)", "Daly BMS（原生 CAN）"),
+    "category": "battery",
+    "description": T(
+        "Daly smart BMS on their own CAN protocol (not the 0x35x inverter protocol): pack voltage, current, state "
+        "of charge, cell extremes, temperatures, MOS switches and faults. The BMS answers requests only, so this "
+        "template sends them once you turn on polling for the device.",
+        "Daly 智慧 BMS 的原生 CAN 協定（不是給逆變器的 0x35x）：總電壓、電流、電量、電芯極值、溫度、MOS 開關與故障。"
+        "BMS 只回答請求，所以要在裝置上開啟「主動輪詢」後這個範本才會送出請求。"),
+    "bitrate": 250000,
+    "transmits": True,
+    "manufacturer": "Daly",
+    "model": "Smart BMS (CAN)",
+    "default_name": T("Daly BMS", "Daly BMS"),
+    "source": ["Daly CAN Communications Protocol V1.0 (2019-06-11)",
+               "Daly UART protocol and community libraries (byte order; reference only)"],
+    "license": "Facts from the vendor document, written by WOOWTECH; MIT",
+    "verified": ["The document's ID rule (0x18100140 / 0x18104001) and a worked example frame"],
+    "confidence": "medium",
+    "notes": T("The document does not state the byte order; big endian is assumed, as in Daly's UART protocol. "
+               "The current's sign (above 30000 = charging) is assumed too. 250 kbit/s, 29-bit IDs.",
+               "原廠文件沒寫位元組順序，這裡跟 Daly 的 UART 協定一樣當作 big endian；電流正負（大於 30000 為充電）也是推定。"
+               "250 kbit/s、29-bit ID。"),
+    "params": [
+        {"key": "bms_address", "default": 1, "description": T("BMS address (1)", "BMS 位址（1）")},
+        {"key": "host_address", "default": 64, "description": T("This host's address (64 = 0x40)", "本機位址（64＝0x40）")},
+    ],
+    "groups": [],
+    "max_rate": 5,
+    "messages": [
+        {"name": "Pack_90", "can_id": daly_id(0x90, True), "length": 8, "cycle_ms": 1000, "signals": [
+            sig("TotalVoltage", 7, 16, order="big", factor=0.1, unit="V",
+                entity=ent("battery.voltage", "Pack voltage", "總電壓")),
+            sig("AcquiredVoltage", 23, 16, order="big", factor=0.1, unit="V",
+                entity=ent("battery.acquired_voltage", "Acquired voltage", "採集總壓", enabled=False)),
+            sig("Current", 39, 16, order="big", factor=0.1, offset=-3000, unit="A",
+                entity=ent("battery.current", "Current", "電流")),
+            sig("SOC", 55, 16, order="big", factor=0.1, unit="%",
+                entity=ent("battery.soc", "State of charge", "電量", device_class="battery")),
+            sig("Power", 0, 0, unit="W", derive={"op": "product", "of": ["TotalVoltage", "Current"]},
+                entity=ent("battery.power", "Power", "功率", precision=0)),
+        ]},
+        {"name": "Cells_91", "can_id": daly_id(0x91, True), "length": 8, "cycle_ms": 2000, "signals": [
+            sig("MaxCellVoltage", 7, 16, order="big", factor=0.001, unit="V",
+                entity=ent("battery.max_cell_voltage", "Highest cell voltage", "最高電芯電壓")),
+            sig("MaxCellNumber", 23, 8, order="big",
+                entity=ent("battery.max_cell_number", "Highest cell", "最高電芯編號", enabled=False)),
+            sig("MinCellVoltage", 31, 16, order="big", factor=0.001, unit="V",
+                entity=ent("battery.min_cell_voltage", "Lowest cell voltage", "最低電芯電壓")),
+            sig("MinCellNumber", 47, 8, order="big",
+                entity=ent("battery.min_cell_number", "Lowest cell", "最低電芯編號", enabled=False)),
+            sig("CellDelta", 0, 0, factor=1000, unit="mV", derive={"op": "difference", "of": ["MaxCellVoltage",
+                                                                                              "MinCellVoltage"]},
+                entity=ent("battery.cell_delta", "Cell voltage difference", "電芯壓差", precision=0)),
+        ]},
+        {"name": "Temperatures_92", "can_id": daly_id(0x92, True), "length": 8, "cycle_ms": 2000, "signals": [
+            sig("MaxTemperature", 7, 8, order="big", offset=-40, unit="°C",
+                entity=ent("battery.max_temperature", "Highest temperature", "最高溫度")),
+            sig("MaxTemperatureSensor", 15, 8, order="big"),
+            sig("MinTemperature", 23, 8, order="big", offset=-40, unit="°C",
+                entity=ent("battery.min_temperature", "Lowest temperature", "最低溫度")),
+            sig("MinTemperatureSensor", 31, 8, order="big"),
+        ]},
+        {"name": "Mos_93", "can_id": daly_id(0x93, True), "length": 8, "cycle_ms": 5000, "signals": [
+            sig("State", 7, 8, order="big", values={0: "idle", 1: "charging", 2: "discharging"},
+                entity=ent("battery.state", "State", "狀態")),
+            sig("ChargeMos", 15, 8, order="big",
+                entity=ent("battery.charge_mos", "Charge MOS", "充電 MOS", platform="binary_sensor")),
+            sig("DischargeMos", 23, 8, order="big",
+                entity=ent("battery.discharge_mos", "Discharge MOS", "放電 MOS", platform="binary_sensor")),
+            sig("BmsLife", 31, 8, order="big"),
+            sig("RemainingCapacity", 39, 32, order="big", factor=0.001, unit="Ah",
+                entity=ent("battery.remaining_capacity", "Remaining capacity", "剩餘容量")),
+        ]},
+        {"name": "Faults_98", "can_id": daly_id(0x98, True), "length": 8, "cycle_ms": 5000, "signals": [
+            sig("FaultBits", 7, 56, order="big", entity=ent("battery.fault_bits", "Fault bits", "故障位元",
+                                                             format="hex", enabled=False)),
+            sig("FaultCode", 63, 8, order="big"),
+            sig("Fault", 0, 0, derive={"op": "nonzero", "of": ["FaultBits"]},
+                entity=problem("battery.fault", "BMS fault", "BMS 故障", enabled=True)),
+        ]},
+    ],
+    "requests": [
+        {"name": f"Read {data_id:02X}", "can_id": daly_id(data_id, False), "data": "00 00 00 00 00 00 00 00",
+         "period_ms": period, "reply": reply, "timeout_ms": 300}
+        for data_id, period, reply in ((0x90, 1000, "Pack_90"), (0x91, 2000, "Cells_91"),
+                                       (0x92, 2000, "Temperatures_92"), (0x93, 5000, "Mos_93"),
+                                       (0x98, 5000, "Faults_98"))
+    ],
+}
+
+
+# ---- 8. CiA 401 generic I/O (ICP DAS CAN-20xx and others) ----------------------------------------------
+def sdo_reply(name: str, index: int, sub: int, signals: list[dict], cycle_ms: int) -> dict:
+    """An expedited SDO upload response (0x580 + node): any of the 1-4 byte answers, this index and sub-index."""
+    return {"name": name, "can_id": "0x580 + node_id", "extended": False, "length": 8, "cycle_ms": cycle_ms,
+            "filters": [{"byte": 0, "values": ["0x4F", "0x4B", "0x47", "0x43", "0x42"]},
+                        {"byte": 1, "value": f"0x{index & 0xFF:02X}"}, {"byte": 2, "value": f"0x{index >> 8:02X}"},
+                        {"byte": 3, "value": f"0x{sub:02X}"}],
+            "comment": f"SDO upload response {index:04X}:{sub:02X}", "signals": signals}
+
+
+def sdo_read(name: str, index: int, sub: int, period_ms: int, reply: str) -> dict:
+    return {"name": name, "can_id": "0x600 + node_id", "extended": False,
+            "data": ["0x40", f"0x{index & 0xFF:02X}", f"0x{index >> 8:02X}", f"0x{sub:02X}", "0", "0", "0", "0"],
+            "period_ms": period_ms, "reply": reply, "timeout_ms": 300}
+
+
+def heartbeat(cycle: str = "heartbeat_ms") -> dict:
+    return {"name": "Heartbeat", "can_id": "0x700 + node_id", "extended": False, "length": 1, "cycle_ms": cycle,
+            "signals": [
+                sig("State", 0, 7, values={0: "boot_up", 4: "stopped", 5: "operational", 127: "pre_operational"},
+                    entity=ent("node.state", "NMT state", "NMT 狀態", icon="mdi:state-machine")),
+                sig("Online", 0, 0, derive={"op": "present"},
+                    entity=ent("node.online", "Online", "在線", platform="binary_sensor", device_class="connectivity",
+                               on_timeout="off")),
+            ]}
+
+
+IO = {
+    "id": "cia401_io",
+    "version": 1,
+    "name": T("CANopen I/O module (CiA 401)", "CANopen I/O 模組（CiA 401）"),
+    "category": "industrial",
+    "description": T(
+        "Digital inputs and outputs and analogue inputs of a CiA 401 module (ICP DAS CAN-2053C / 2057C / 2017C and "
+        "similar): inputs as binary sensors from TPDO1, outputs as switches over RPDO1, analogue inputs read with "
+        "SDO. Outputs and the NMT start button appear only after you allow writing for the device; the analogue "
+        "inputs are read only while polling is on.",
+        "CiA 401 模組（ICP DAS CAN-2053C／2057C／2017C 等）的數位輸入輸出與類比輸入：輸入由 TPDO1 變成二元感測器、"
+        "輸出經 RPDO1 變成開關、類比輸入用 SDO 讀取。要在裝置上「允許寫入」後才會出現輸出開關和 NMT 啟動按鈕；"
+        "開啟「主動輪詢」才會讀類比輸入。"),
+    "bitrate": None,
+    "transmits": True,
+    "manufacturer": "CANopen",
+    "model": "CiA 401 I/O",
+    "default_name": T("I/O module", "I/O 模組"),
+    "source": ["CiA 301 v4.02 and CiA 401 (facts only)", "ICP DAS CAN-2000C series manuals (example frames)",
+               "CANopenNode (Apache-2.0)", "python canopen (MIT)"],
+    "license": "Facts from public documents, written by WOOWTECH; MIT",
+    "verified": ["TPDO1 / RPDO1 / SDO frames from the ICP DAS manuals (CAN-2053C, CAN-2057C, CAN-2017C)"],
+    "confidence": "high",
+    "notes": T("A module only sends inputs once it is operational: press NMT start (or let the PLC do it). Only "
+               "one device on a bus should poll a node with SDO and send its outputs: leave writing off where a PLC "
+               "controls the module. RPDO1 sends all 16 outputs at once; after a restart the outputs' last states "
+               "are restored first.",
+               "模組要進入 operational 才會送輸入：按 NMT 啟動（或由 PLC 啟動）。同一條匯流排上只應有一個設備用 SDO 輪詢"
+               "和送輸出：已有 PLC 控制的模組請不要允許寫入。RPDO1 一次送出全部 16 路輸出；重新啟動後會先還原輸出的最後狀態。"),
+    "params": [
+        {"key": "node_id", "default": 1, "description": T("Node ID (1-127)", "節點編號（1–127）")},
+        {"key": "heartbeat_ms", "default": 1000,
+         "description": T("The node's heartbeat period in ms (object 0x1017)", "節點的 heartbeat 週期，毫秒（物件 0x1017）")},
+    ],
+    "groups": [],
+    "max_rate": 10,
+    "messages": [
+        heartbeat(),
+        {"name": "Inputs", "can_id": "0x180 + node_id", "extended": False, "length": 2,
+         "comment": "TPDO1: 0x6000 read input 8-bit, sub-indices 1-2", "signals": [
+            bit(f"DI{i}", i, entity=ent(f"io.di{i}", f"Input {i}", f"輸入 {i}", platform="binary_sensor",
+                                        enabled=i < 8)) for i in range(16)]},
+        {"name": "Outputs", "can_id": "0x200 + node_id", "extended": False, "length": 2, "send": True,
+         "comment": "RPDO1: 0x6200 write output 8-bit, sub-indices 1-2", "signals": [
+            bit(f"DO{i}", i, entity=ent(f"io.do{i}", f"Output {i}", f"輸出 {i}", platform="switch", enabled=i < 8))
+            for i in range(16)]},
+        {"name": "NMT", "can_id": "0x000", "extended": False, "length": 2, "send": True, "data": ["0x01", "node_id"],
+         "comment": "NMT: start remote node", "signals": [
+            sig("Command", 0, 8, values={1: "start", 2: "stop", 128: "enter_pre_operational"},
+                entity=ent("node.start", "Start node (NMT)", "啟動節點（NMT）", platform="button", press="start",
+                           icon="mdi:play")),
+        ]},
+        {"name": "Analog_TPDO2", "can_id": "0x280 + node_id", "extended": False, "length": 8,
+         "comment": "TPDO2: 0x6401 analogue inputs 1-4 (often off: 0x6423)", "signals": [
+            sig(f"AI{i + 1}_PDO", 16 * i, 16, signed=True) for i in range(4)]},
+    ] + [sdo_reply(f"AI{i}_SDO", 0x6401, i, [
+            sig(f"AI{i}", 32, 16, signed=True,
+                entity=ent(f"io.ai{i}", f"Analogue input {i} (raw)", f"類比輸入 {i}（原始值）", enabled=i <= 2))], 3000)
+         for i in range(1, 5)],
+    "requests": [sdo_read(f"Read AI{i}", 0x6401, i, 1000, f"AI{i}_SDO") for i in range(1, 5)],
+}
+
+
+# ---- 9. CiA 402 drive monitor (reads, never controls) ----------------------------------------------------
+CIA402_STATES = [["0x004F", "0x0000", "not_ready_to_switch_on"], ["0x004F", "0x0040", "switch_on_disabled"],
+                 ["0x006F", "0x0021", "ready_to_switch_on"], ["0x006F", "0x0023", "switched_on"],
+                 ["0x006F", "0x0027", "operation_enabled"], ["0x006F", "0x0007", "quick_stop_active"],
+                 ["0x004F", "0x000F", "fault_reaction_active"], ["0x004F", "0x0008", "fault"]]
+CIA402_MODES = {1: "profile_position", 2: "velocity", 3: "profile_velocity", 4: "profile_torque", 6: "homing",
+                7: "interpolated_position", 8: "cyclic_sync_position", 9: "cyclic_sync_velocity",
+                10: "cyclic_sync_torque"}
+
+
+def statusword_signals(prefix: str, enabled: bool) -> list[dict]:
+    suffix = " (SDO)" if prefix else ""
+    zh_suffix = "（SDO）" if prefix else ""
+    key = "drive.sdo_" if prefix else "drive."
+    return [
+        sig(f"{prefix}Statusword", 0 if not prefix else 32, 16,
+            entity=ent(f"{key}statusword", f"Statusword{suffix}", f"狀態字{zh_suffix}", format="hex", enabled=False)),
+        sig(f"{prefix}State", 0, 0, derive={"op": "masked_lookup", "of": [f"{prefix}Statusword"], "table": CIA402_STATES},
+            entity=ent(f"{key}state", f"Drive state{suffix}", f"驅動器狀態{zh_suffix}", enabled=enabled,
+                       options=[s[2] for s in CIA402_STATES], icon="mdi:state-machine")),
+        bit(f"{prefix}Fault", (0 if not prefix else 32) + 3,
+            entity=problem(f"{key}fault", f"Fault{suffix}", f"故障{zh_suffix}", enabled=enabled)),
+        bit(f"{prefix}Warning", (0 if not prefix else 32) + 7,
+            entity=ent(f"{key}warning", f"Warning{suffix}", f"警告{zh_suffix}", platform="binary_sensor",
+                       device_class="problem", enabled=enabled)),
+        bit(f"{prefix}TargetReached", (0 if not prefix else 32) + 10,
+            entity=ent(f"{key}target_reached", f"Target reached{suffix}", f"到達目標{zh_suffix}",
+                       platform="binary_sensor", enabled=False)),
+    ]
+
+
+DRIVE = {
+    "id": "cia402_drive_monitor",
+    "version": 1,
+    "name": T("CANopen drive monitor (CiA 402)", "CANopen 驅動器監看（CiA 402）"),
+    "category": "industrial",
+    "description": T(
+        "Servo, stepper and frequency drives on CANopen (CiA 402, e.g. maxon EPOS4): the drive state from the "
+        "statusword, fault and warning, and with polling on the actual position, velocity, torque, operating mode "
+        "and error code read with SDO. It only reads: it never enables or moves a drive.",
+        "CANopen 上的伺服、步進、變頻驅動器（CiA 402，例如 maxon EPOS4）：由狀態字判斷驅動器狀態、故障與警告；開啟"
+        "「主動輪詢」後再用 SDO 讀實際位置、速度、扭矩、運轉模式和錯誤碼。只讀取，不會啟用或移動驅動器。"),
+    "bitrate": None,
+    "transmits": True,
+    "manufacturer": "CANopen",
+    "model": "CiA 402 drive",
+    "default_name": T("Drive", "驅動器"),
+    "source": ["CiA 402 (facts only)", "maxon EPOS4 firmware specification (objects, statusword table)",
+               "python canopen (MIT; state masks)"],
+    "license": "Facts from public documents, written by WOOWTECH; MIT",
+    "verified": ["Statusword and SDO frames from the research scripts (EPOS4 objects)"],
+    "confidence": "high",
+    "notes": T("TPDO1 carries the statusword on most drives (EPOS4: enabled by default); without it, adopt the "
+               "SDO state entities. Velocity units depend on the drive (EPOS4: rpm), positions are increments. "
+               "Only one device should poll a drive with SDO: leave polling off where a PLC talks to it.",
+               "多數驅動器的 TPDO1 帶狀態字（EPOS4 出廠就開）；沒有的話改用「（SDO）」的狀態實體。速度單位依驅動器而定"
+               "（EPOS4：rpm），位置是脈衝數。同一個驅動器只應有一個設備用 SDO 輪詢：已有 PLC 跟它通訊時請不要開輪詢。"),
+    "params": [
+        {"key": "node_id", "default": 1, "description": T("Node ID (1-127)", "節點編號（1–127）")},
+        {"key": "heartbeat_ms", "default": 1000,
+         "description": T("The node's heartbeat period in ms (object 0x1017)", "節點的 heartbeat 週期，毫秒（物件 0x1017）")},
+    ],
+    "groups": [],
+    "max_rate": 10,
+    "messages": [
+        heartbeat(),
+        {"name": "Statusword_TPDO1", "can_id": "0x180 + node_id", "extended": False, "length": 2,
+         "comment": "TPDO1: statusword 0x6041", "signals": statusword_signals("", True)},
+        sdo_reply("Statusword_SDO", 0x6041, 0, statusword_signals("Sdo", False), 3000),
+        sdo_reply("Mode_SDO", 0x6061, 0, [sig("ModeDisplay", 32, 8, signed=True, values=CIA402_MODES,
+                                              entity=ent("drive.mode", "Operating mode", "運轉模式"))], 6000),
+        sdo_reply("Position_SDO", 0x6064, 0, [sig("PositionActual", 32, 32, signed=True,
+                                                  entity=ent("drive.position", "Actual position", "實際位置",
+                                                             unit="inc", precision=0))], 1500),
+        sdo_reply("Velocity_SDO", 0x606C, 0, [sig("VelocityActual", 32, 32, signed=True, unit="rpm",
+                                                  entity=ent("drive.velocity", "Actual velocity", "實際速度"))], 1500),
+        sdo_reply("Torque_SDO", 0x6077, 0, [sig("TorqueActual", 32, 16, signed=True, factor=0.1, unit="%",
+                                                entity=ent("drive.torque", "Actual torque", "實際扭矩"))], 3000),
+        sdo_reply("ErrorCode_SDO", 0x603F, 0, [sig("ErrorCode", 32, 16, entity=ent("drive.error_code", "Error code",
+                                                                                   "錯誤碼", format="hex"))], 6000),
+        {"name": "Emergency", "can_id": "0x80 + node_id", "extended": False, "length": 8, "signals": [
+            sig("EmergencyCode", 0, 16, entity=ent("node.error_code", "Emergency error code", "緊急錯誤碼",
+                                                    format="hex", enabled=False)),
+            sig("ErrorRegister", 16, 8),
+        ]},
+    ],
+    "requests": [sdo_read("Read mode", 0x6061, 0, 2000, "Mode_SDO"),
+                 sdo_read("Read position", 0x6064, 0, 500, "Position_SDO"),
+                 sdo_read("Read velocity", 0x606C, 0, 500, "Velocity_SDO"),
+                 sdo_read("Read torque", 0x6077, 0, 1000, "Torque_SDO"),
+                 sdo_read("Read error code", 0x603F, 0, 2000, "ErrorCode_SDO"),
+                 sdo_read("Read statusword", 0x6041, 0, 1000, "Statusword_SDO")],
+}
+
+TEMPLATES = [BMS, ENGINE, DM1, N2K, CANOPEN, OBD, DALY, IO, DRIVE]
 
 
 def main() -> None:
@@ -564,7 +932,8 @@ def main() -> None:
         path = OUT / f"{template['id']}.json"
         path.write_text(json.dumps(template, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         print(f"{path.name}: {len(template['messages'])} messages, "
-              f"{sum(len(m['signals']) for m in template['messages'])} signals")
+              f"{sum(len(m['signals']) for m in template['messages'])} signals, "
+              f"{len(template.get('requests') or [])} requests")
 
 
 if __name__ == "__main__":

@@ -248,6 +248,14 @@ export class WoowCanPanel extends LitElement {
       case "databases":
         this.databases = event.databases;
         break;
+      case "requests": {
+        const devices = { ...this.devices };
+        for (const [id, requests] of Object.entries(event.requests)) {
+          if (devices[id]) devices[id] = { ...devices[id], requests };
+        }
+        this.devices = devices;
+        break;
+      }
       case "offline":
         this.offline = event.offline;
         if (this.source.startsWith("file:") && !event.offline.some((o) => o.id === this.source)) {

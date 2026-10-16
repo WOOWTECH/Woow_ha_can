@@ -139,14 +139,38 @@ export interface TracePage {
   scanned: number;
 }
 
+export interface WriteSpec {
+  platform: "switch" | "number" | "select" | "button";
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: string[];
+  press?: unknown;
+  on?: unknown;
+  off?: unknown;
+}
+
 export interface SignalStatus {
   name: string;
   value: unknown;
   unit: string;
   adopted: boolean;
   entity_id: string | null;
-  platform: "sensor" | "binary_sensor";
+  platform: "sensor" | "binary_sensor" | "switch" | "number" | "select" | "button";
   disabled: boolean;
+  write?: WriteSpec;
+}
+
+export interface RequestStatus {
+  name: string;
+  period_ms: number;
+  effective_ms: number;
+  sent: number;
+  replies: number;
+  misses: number;
+  state: "ok" | "waiting" | "no_reply" | "paused" | "error";
+  error: string | null;
+  last_reply_s_ago: number | null;
 }
 
 export interface MessageStatus {
@@ -155,6 +179,7 @@ export interface MessageStatus {
   seen_s_ago: number | null;
   fresh: boolean | null;
   signals: SignalStatus[];
+  send?: boolean;
 }
 
 export interface EntitySettings {
@@ -203,6 +228,11 @@ export interface DeviceView {
   status: MessageStatus[];
   extra: Record<string, unknown>;
   definition?: { messages: MessageDef[]; [key: string]: unknown };
+  active?: boolean;
+  allow_write?: boolean;
+  has_requests?: boolean;
+  writable?: boolean;
+  requests?: RequestStatus[];
 }
 
 export interface TemplateSummary {
@@ -267,6 +297,7 @@ export type FeedEvent =
   | { kind: "offline"; offline: OfflineInfo[] }
   | { kind: "devices"; devices: DeviceView[]; removed: string[] }
   | { kind: "values"; values: Values; t: number }
+  | { kind: "requests"; requests: Record<string, RequestStatus[]> }
   | { kind: "databases"; databases: DatabaseSummary[] };
 
 export interface FrameDict {
@@ -583,6 +614,14 @@ export class Api {
     adopt = true,
   ): Promise<DeviceView> {
     return this.hass().callWS({ type: "woow_can/devices/add_signal", entry_id: entryId, key, signal, adopt, ...target });
+  }
+
+  deviceOptions(deviceId: string, options: { active?: boolean; allow_write?: boolean }): Promise<DeviceView> {
+    return this.hass().callWS({ type: "woow_can/devices/options", device_id: deviceId, ...options });
+  }
+
+  writeSignal(deviceId: string, message: string, signal: string, value: unknown): Promise<{ data: string }> {
+    return this.hass().callWS({ type: "woow_can/devices/write", device_id: deviceId, message, signal, value });
   }
 
   saveDevice(device: Record<string, unknown>): Promise<DeviceView> {

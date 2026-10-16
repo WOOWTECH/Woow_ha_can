@@ -509,6 +509,54 @@
         }
       }
     },
+    "control_device": {
+      "name": "Turn polling or writing on / off",
+      "description": "Devices whose equipment must be asked (OBD-II, Daly BMS, CANopen SDO) send their requests only while polling (active) is on; devices with outputs (switches, numbers, buttons) get those entities and accept writes only while writing is allowed. Both are off when a device is made. Only turn them on when the user asked for it, on the bus the user meant: no other master may be polling or controlling the same equipment. Admin only.",
+      "fields": {
+        "device": {
+          "name": "Device",
+          "description": "Name or id."
+        },
+        "active": {
+          "name": "Polling",
+          "description": "true: send the device's requests (politely, at most max_rate a second, backing off when unanswered); false: stop."
+        },
+        "allow_write": {
+          "name": "Allow writing",
+          "description": "true: create the writable entities and accept write_signal; false: remove them."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Why, in a few words; shown in the activity log."
+        }
+      }
+    },
+    "write_signal": {
+      "name": "Write a signal",
+      "description": "Send one value of a writable signal (a relay output, a set point, a mode, a command) of a device that allows writing: the command frame is built over the last one sent, so the other outputs in it keep their values. get_device lists the writable signals (write). Only write what the user asked for. Admin only.",
+      "fields": {
+        "device": {
+          "name": "Device",
+          "description": "Name or id."
+        },
+        "message": {
+          "name": "Message",
+          "description": "The message of the signal, e.g. Outputs."
+        },
+        "signal": {
+          "name": "Signal",
+          "description": "The signal, e.g. DO3."
+        },
+        "value": {
+          "name": "Value",
+          "description": "A number in the signal's unit, or a label of its value table (start, auto)."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Why, in a few words; shown in the activity log."
+        }
+      }
+    },
     "decode_frame": {
       "name": "Decode a frame",
       "description": "What the devices and attached DBC files of an interface make of a frame. Call it with return_response: true.",

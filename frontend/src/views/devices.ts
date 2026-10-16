@@ -58,6 +58,8 @@ export class WoowCanDevices extends LitElement {
   @state() private busy = false;
   @state() private message: { ok: boolean; text: string } | null = null;
   @state() private deleting = "";
+  @state() private confirming = ""; // "<device id>|active" or "|allow_write" waiting for confirmation
+  @state() private numbers: Record<string, string> = {}; // number inputs being typed
   @state() private settingsFor = "";
   @state() private settings: { min_interval: string; tolerance: string; timeout: string } = {
     min_interval: "", tolerance: "", timeout: "" };
@@ -108,6 +110,13 @@ export class WoowCanDevices extends LitElement {
       }
       col.c-actions {
         width: 110px;
+      }
+      table.writing col.c-value {
+        width: 30%;
+      }
+      td.val button {
+        padding: 2px 10px;
+        margin-right: 4px;
       }
       td {
         overflow: hidden;
@@ -221,6 +230,20 @@ export class WoowCanDevices extends LitElement {
         cursor: pointer;
         color: var(--secondary-text-color);
       }
+      .confirm {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        align-items: center;
+        padding: 8px 10px;
+        border: 1px solid var(--warning-color, #f0ad4e);
+        border-radius: 8px;
+        margin: 4px 0;
+      }
+      .toggle-line {
+        gap: 6px;
+        margin-right: 16px;
+      }
       .inline {
         display: flex;
         flex-wrap: wrap;
@@ -329,7 +352,9 @@ export class WoowCanDevices extends LitElement {
               <div>${tpl.description}</div>
               ${tpl.notes ? html`<div class="muted">${tpl.notes}</div>` : nothing}
               <div class="row">
-                <span class="chip ok">${t("only_listens")}</span>
+                ${tpl.transmits
+                  ? html`<span class="chip warn">${t("sends_when_on")}</span>`
+                  : html`<span class="chip ok">${t("only_listens")}</span>`}
                 <span class="chip">${t("confidence", { x: label("confidence", tpl.confidence) })}</span>
                 ${tpl.bitrate ? html`<span class="chip">${t("kbps", { n: tpl.bitrate / 1000 })}</span>` : nothing}
               </div>
@@ -404,14 +429,89 @@ export class WoowCanDevices extends LitElement {
     if (await this.run(() => this.api.setSignal(device.id, msg, sig, { entity: entity as never }))) this.settingsFor = "";
   }
 
+  // ---- polling, writing -----------------------------------------------------------------
+  private async setOption(device: DeviceView, what: "active" | "allow_write", on: boolean): Promise<void> {
+    this.confirming = "";
+    await this.run(() => this.api.deviceOptions(device.id, { [what]: on }));
+  }
+
+  private renderControls(device: DeviceView) {
+    const t = this.t;
+    if (!device.has_requests && !device.writable) return nothing;
+    const toggle = (what: "active" | "allow_write", label: string, on: boolean) => {
+      const key = `${device.id}|${what}`;
+      if (this.confirming === key) {
+        return html`<div class="confirm">
+          <span>${t(what === "active" ? "confirm_polling" : "confirm_writing", { name: device.name, iface: this.iname(device.interface) })}</span>
+          <button class="primary" ?disabled=${this.busy} @click=${() => this.setOption(device, what, true)}>${t("turn_on")}</button>
+          <button @click=${() => (this.confirming = "")}>${t("cancel")}</button>
+        </div>`;
+      }
+      return html`<label class="row toggle-line"><input type="checkbox" .checked=${on} ?disabled=${this.busy}
+        @change=${(e: Event) => {
+          if (checked(e)) {
+            (e.target as HTMLInputElement).checked = false;
+            this.confirming = key;
+          } else void this.setOption(device, what, false);
+        }} />${label}</label>`;
+    };
+    const requests = device.requests ?? [];
+    return html`<div class="msg">
+      <div class="row">
+        ${device.has_requests ? toggle("active", t("polling"), !!device.active) : nothing}
+        ${device.writable ? toggle("allow_write", t("writing"), !!device.allow_write) : nothing}
+      </div>
+      ${requests.length
+        ? html`<div class="wrap"><table><tbody>${requests.map((r) => html`<tr>
+            <td>${r.name}</td>
+            <td class="muted">${t("req_period", { ms: r.period_ms })}${r.effective_ms > r.period_ms
+              ? html` · <span style="color:var(--warning-color)">${t("req_slowed", { ms: r.effective_ms })}</span>` : nothing}</td>
+            <td class="muted">${t("req_counts", { sent: r.sent, replies: r.replies })}</td>
+            <td><span class="chip ${r.state === "ok" ? "ok" : r.state === "waiting" ? "" : "warn"}"
+              title=${r.error ?? ""}>${t(`req_${r.state}` as Key)}</span></td>
+          </tr>`)}</tbody></table></div>`
+        : nothing}
+    </div>`;
+  }
+
+  private writeControl(device: DeviceView, message: string, s: SignalStatus, current: unknown) {
+    const t = this.t;
+    const w = s.write!;
+    const write = (v: unknown) =>
+      this.run(async () => {
+        const res = await this.api.writeSignal(device.id, message, s.name, v);
+        this.message = { ok: true, text: t("written", { data: res.data }) };
+      });
+    switch (w.platform) {
+      case "switch":
+        return html`<button class=${current === w.on ? "primary" : ""} ?disabled=${this.busy} @click=${() => write(w.on ?? 1)}>${t("write_on")}</button>
+          <button class=${current === w.off ? "primary" : ""} ?disabled=${this.busy} @click=${() => write(w.off ?? 0)}>${t("write_off")}</button>`;
+      case "button":
+        return html`<button ?disabled=${this.busy} @click=${() => write(w.press)}>${t("write_press")}</button>`;
+      case "select":
+        return html`<select ?disabled=${this.busy} @change=${(e: Event) => write(value(e))}>
+          ${(w.options ?? []).map((o) => html`<option value=${o} ?selected=${o === current}>${o}</option>`)}
+        </select>`;
+      default: {
+        const key = `${device.id}|${message}.${s.name}`;
+        return html`<input type="number" style="width:90px" min=${w.min ?? ""} max=${w.max ?? ""} step=${w.step ?? "any"}
+            .value=${this.numbers[key] ?? (typeof current === "number" ? String(current) : "")}
+            @input=${(e: Event) => (this.numbers = { ...this.numbers, [key]: value(e) })} />
+          <button ?disabled=${this.busy || this.numbers[key] === undefined}
+            @click=${() => write(parseFloat(this.numbers[key]))}>${t("write_set")}</button>`;
+      }
+    }
+  }
+
   private renderDevice(device: DeviceView) {
     const t = this.t;
     const live = this.values[device.id] ?? {};
     const status = device.status;
     const adopted = status.reduce((n, m) => n + m.signals.filter((s) => s.adopted).length, 0);
-    const fresh = status.filter((m) => m.fresh === true).length;
-    const stale = status.filter((m) => m.fresh === false && m.seen_s_ago !== null).length;
-    const never = status.filter((m) => m.seen_s_ago === null).length;
+    const received = status.filter((m) => !m.send);
+    const fresh = received.filter((m) => m.fresh === true).length;
+    const stale = received.filter((m) => m.fresh === false && m.seen_s_ago !== null).length;
+    const never = received.filter((m) => m.seen_s_ago === null).length;
     const open = this.open === device.id;
     return html`<div class="device">
       <div class="row">
@@ -419,6 +519,8 @@ export class WoowCanDevices extends LitElement {
         <span class="chip">${this.iname(device.interface)}</span>
         ${device.template ? html`<span class="chip info">${this.templates.find((x) => x.id === device.template)?.name ?? device.template}</span>` : nothing}
         ${device.source.startsWith("dbc:") ? html`<span class="chip info">${device.source.slice(4)}</span>` : nothing}
+        ${device.active ? html`<span class="chip warn">${t("polling_chip")}</span>` : nothing}
+        ${device.allow_write ? html`<span class="chip bad">${t("writing_chip")}</span>` : nothing}
         <span class="grow"></span>
         <button class="link" @click=${() => (this.open = open ? "" : device.id)}>${open ? "▲" : "▼"}</button>
       </div>
@@ -429,27 +531,32 @@ export class WoowCanDevices extends LitElement {
         ${never ? html` · ${never} ${t("never_seen")}` : nothing}
       </div>
       ${open
-        ? html`${status.map((m) => html`<div class="msg">
+        ? html`${this.renderControls(device)}${status.map((m) => html`<div class="msg">
               <div class="row">
                 <b>${m.name}</b><span class="muted mono">${m.id}</span>
-                <span class="chip ${m.fresh === true ? "ok" : m.fresh === false && m.seen_s_ago !== null ? "warn" : ""}">
-                  ${m.seen_s_ago === null ? t("never_seen") : m.fresh === false ? t("stale") : t("fresh")}</span>
+                ${m.send
+                  ? html`<span class="chip info">${t("sent_from_here")}</span>`
+                  : html`<span class="chip ${m.fresh === true ? "ok" : m.fresh === false && m.seen_s_ago !== null ? "warn" : ""}">
+                      ${m.seen_s_ago === null ? t("never_seen") : m.fresh === false ? t("stale") : t("fresh")}</span>`}
               </div>
-              <div class="wrap"><table>
+              <div class="wrap"><table class=${device.allow_write && m.signals.some((x) => x.write) ? "writing" : ""}>
                 <colgroup><col class="c-adopt" /><col class="c-name" /><col class="c-value" /><col /><col class="c-actions" /></colgroup>
                 <tbody>
                   ${m.signals.map((s) => {
                     const key = `${m.name}.${s.name}`;
                     const v = key in live ? live[key] : s.value;
                     const chartKey = `${device.id}|${key}`;
-                    const numeric = typeof v === "number" && s.platform !== "binary_sensor";
+                    const numeric = typeof v === "number" && (s.platform === "sensor" || s.platform === "number");
+                    const writing = !!s.write && !!device.allow_write;
                     return html`<tr>
                         <td><input type="checkbox" title=${t("adopt_hint")} .checked=${s.adopted}
                           @change=${(e: Event) => this.adopt(device, m.name, s, checked(e))} /></td>
                         <td>${s.name}</td>
-                        <td class="val">${s.platform === "binary_sensor" && (v === 0 || v === 1 || typeof v === "boolean")
-                          ? (v === 1 || v === true ? t("state_on") : t("state_off"))
-                          : formatValue(v, s.unit)}</td>
+                        <td class="val">${writing
+                          ? this.writeControl(device, m.name, s, v)
+                          : (s.platform === "binary_sensor" || s.platform === "switch") && (v === 0 || v === 1 || typeof v === "boolean")
+                            ? (v === 1 || v === true ? t("state_on") : t("state_off"))
+                            : formatValue(v, s.unit)}</td>
                         <td title=${s.entity_id ?? ""}>${s.entity_id
                           ? s.disabled
                             ? html`<span class="off-entity">${s.entity_id} · ${t("entity_disabled")}</span>`

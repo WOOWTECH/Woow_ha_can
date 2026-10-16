@@ -31,7 +31,8 @@ from .services import SEND_SCHEMA  # noqa: F401  (imported by the tests)
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.EVENT, Platform.SENSOR, Platform.TEXT]  # each interface
-HUB_PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]  # entities of the devices (admin entry)
+HUB_PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.NUMBER, Platform.SELECT, Platform.SENSOR,
+                 Platform.SWITCH]  # entities of the devices (admin entry)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 

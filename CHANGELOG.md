@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 — 2026-10-17
+
+Devices that ask their equipment and devices with outputs — both off until a person turns them on.
+
+- **Polling**: a device can carry requests (a frame, a period, the message that answers it), sent only while polling is on for that device. One request per device waits for its reply at a time, a device sends at most `max_rate` a second and an interface at most 50; a request unanswered three times in a row slows down step by step to once a minute and recovers with the first reply; polling pauses while the interface is listen-only, down or bus-off. The panel shows each request's period, counts and state.
+- **Writable signals**: switch, number, select and button entities, created only while writing is allowed for the device; command frames are built over the last frame sent (outputs sharing a byte keep their state, restored after a restart), numbers are range-checked, writes of one frame are at least 50 ms apart, and every write is in the activity log. Command messages (`send`) can carry fixed bytes (`data`), also built from template parameters.
+- **Four new templates**: OBD-II live data (Service 01, 11 PIDs, 11- or 29-bit), Daly BMS (native CAN), CANopen I/O module (CiA 401: inputs, output switches, NMT start, analogue inputs by SDO) and CANopen drive monitor (CiA 402: state from the statusword, actual values by SDO; it never controls a drive). Each decodes the research's verified frames in the tests.
+- Message filters accept a list of values (`{byte, values}`, e.g. SDO response codes); a `masked_lookup` derived value names states from bit masks (CiA 402).
+- New services `control_device` and `write_signal`; the Devices tab has polling / writing switches with a confirmation, the request table and controls for writable signals; a device's status (receiving, silent, never seen) now updates live.
+- The simulator plays an OBD-II car, a CiA 402 drive with an SDO server, a CiA 401 I/O node and a Daly BMS; tools/active_check.py checks them end to end. tools/esp holds an ESP32 (ESPHome) test node that plays the same equipment on a real bus.
+
 ## 0.4.0 — 2026-10-17
 
 Finding unknown signals, and log files in the formats other tools use.

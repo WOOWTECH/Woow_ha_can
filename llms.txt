@@ -12,7 +12,7 @@
 - Home Assistant's MCP server (mcp_server, admin): the same services are tools of the LLM API "WOOW CAN".
 - Errors are readable messages: an unknown interface lists the existing ones; bad input names the field.
 - Sending and changes (send, save_periodic, control_periodic, capture, convert_capture, clear_monitor, devices,
-  add_signal, DBC files) need an admin; the analysis tools only read.
+  add_signal, control_device, write_signal, DBC files) need an admin; the analysis tools only read.
 
 ## Workflow
 
@@ -47,6 +47,17 @@
 - `save_device` stores a whole definition (the shape is in `describe` -> device_definition and in `get_device`).
 - `set_signal` {device, message, signal, adopted, min_interval, tolerance, timeout} adopts a signal as an
   entity or tunes it. `decode_frame` {interface, frame} shows what the definitions make of one frame.
+
+## Equipment that must be asked, and outputs
+
+- Templates `obd2_mode01` (cars), `daly_bms`, `cia401_io` (inputs, outputs, NMT start; param node_id) and
+  `cia402_drive_monitor` (reads a drive; never controls it) send requests or have outputs. A new device does
+  neither: `control_device` {device, active: true} starts polling, {allow_write: true} creates the writable
+  entities and allows `write_signal` {device, message, signal, value}. Only when the user asked for it, and only
+  where no PLC or other master polls / controls the same equipment.
+- `get_device` -> `requests` shows each request's state: ok, waiting, no_reply (backed off, e.g. an engine that
+  is off or a PID the car lacks), paused (the interface cannot send: listen-only, down, bus-off).
+- Writes go over the last frame sent for that message (other outputs keep their state) and are in the activity log.
 
 ## Finding unknown signals (with a person at the equipment)
 

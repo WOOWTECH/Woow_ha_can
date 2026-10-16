@@ -40,7 +40,7 @@ _NOTE = vol.Optional("note", default="")  # every change can say why; shown in t
 _LIMIT = vol.All(vol.Coerce(int), vol.Range(min=1, max=2000))
 _WAIT = vol.All(vol.Coerce(int), vol.Range(min=0, max=60000))
 ADMIN_SERVICES = {SERVICE_SEND, "save_periodic", "control_periodic", "capture", "convert_capture", "clear_monitor",
-                  "create_from_template", "add_signal",
+                  "create_from_template", "add_signal", "control_device", "write_signal",
                   "save_device", "delete_device", "set_signal", "import_dbc", "attach_dbc", "create_from_dbc"}
 EXPECT_WAIT = 1.0  # s, when wait_id is given without wait_ms
 
@@ -174,19 +174,31 @@ def describe(hass: HomeAssistant) -> dict[str, Any]:
             "add_signal puts a field into a device as an entity. save_device stores a whole definition "
             "(get_device shows the shape); set_signal adopts a signal or tunes its entity.",
             "decode_frame shows what the definitions make of one frame; list_devices / get_device show current values.",
+            "Devices that send: templates obd2_mode01, daly_bms, cia401_io (inputs, outputs, NMT start) and "
+            "cia402_drive_monitor ask their equipment with requests only while control_device turned polling "
+            "(active) on; writable entities (switch, number, select, button) exist and write_signal works only while "
+            "it allows writing. Both start off; turn them on only when the user asked, on the bus the user meant.",
             "Give every change a short `note`: people read it in the panel's activity log.",
         ],
         "device_definition": {
             "name": "unique", "interface": "interface name or config entry id",
             "messages": "[{name, can_id (hex text, 1-3 digits = 11-bit) or pgn (J1939 / NMEA 2000, decimal), "
-                        "source (J1939 source address), length, cycle_ms (timeout = max(3 cycles, 5 s)), "
-                        "filters [{byte, value}], transport (j1939_tp | n2k_fast), signals}]",
+                        "source (J1939 source address), id_mask, length, cycle_ms (timeout = max(3 cycles, 5 s)), "
+                        "filters [{byte, value} or {byte, values: [..]}], transport (j1939_tp | n2k_fast), "
+                        "send (true: a command frame this integration sends), data (its fixed bytes, hex), signals}]",
+            "requests": "[{name, can_id, data (hex), period_ms (>= 100), reply (the message that answers), timeout_ms}] "
+                        "sent while active; max_rate (per second, default 10); one request waits for its reply at a "
+                        "time; unanswered ones back off up to a minute",
+            "active / allow_write": "polling and writing, false unless turned on (control_device)",
             "signals": "[{name, start, length, byte_order little (Intel, start = LSB) | big (Motorola, start = MSB, "
                        "DBC numbering), signed, kind int | float | ascii, factor, offset, unit, values {raw: label}, "
                        "invalid j1939 | n2k | sma | [raw values], mux_by, mux_values, derive {op: product | sum | "
-                       "difference | any | nonzero | present, of: [signal names]}, entity}]",
-            "entity": "{name, key, platform sensor | binary_sensor, device_class, state_class, unit, precision, "
-                      "enabled, min_interval (s), tolerance, timeout (s), on [raw], off [raw], format hex, icon}",
+                       "difference | any | nonzero | present | masked_lookup (table [[mask, value, label]]), "
+                       "of: [signal names]}, minimum, maximum, start_value, entity}]",
+            "entity": "{name, key, platform sensor | binary_sensor | switch | number | select | button, device_class, "
+                      "state_class, unit, precision, enabled, min_interval (s), tolerance, timeout (s), on, off, "
+                      "format hex, options, icon; writable platforms: the signal is in a send message or entity.write "
+                      "{message, signal} names one; number needs min / max, button press (the value it writes)}",
         },
         "frame_notation": "cansend: 123#11223344 (11-bit), 18FF50E5#0102 (29-bit), 123#R (remote), "
                           "456##1AABBCC (CAN FD; the digit after ## is the flags, 1 = bit rate switch)",
@@ -555,6 +567,32 @@ def async_register(hass: HomeAssistant) -> None:
                      device_id=device.id, port_id=hub.entry.entry_id)
         return {"device": _device_out(admin, device, False)} if call.return_response else None
 
+    async def s_control_device(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        device = _device(admin, call.data["device"])
+        try:
+            device = await admin.async_device_options(device.id, call.data.get("active"), call.data.get("allow_write"))
+        except DefinitionError as err:
+            raise _bad(err) from err
+        await record(call, "control_device", "device_options",
+                     {"device": device.name, "active": "on" if device.active else "off",
+                      "allow_write": "on" if device.allow_write else "off"}, device_id=device.id,
+                     port_id=device.interface)
+        return {"device": _device_out(admin, device, False)} if call.return_response else None
+
+    async def s_write_signal(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        device = _device(admin, call.data["device"])
+        value = call.data["value"]
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        try:
+            data = await admin.devices.async_write(device.id, call.data["message"], call.data["signal"], value,
+                                                   call.context)
+        except DefinitionError as err:
+            raise _bad(err) from err
+        return {"device": device.name, "data": data.hex(" ").upper()} if call.return_response else None
+
     async def s_import_dbc(call: ServiceCall) -> ServiceResponse:
         admin = _need_admin(hass)
         interfaces = [resolve_interface(hass, ref).entry.entry_id if ref != "*" else "*"
@@ -658,6 +696,12 @@ def async_register(hass: HomeAssistant) -> None:
         vol.Optional("offset", default=0.0): vol.Coerce(float),
         vol.Optional("seconds", default=60.0): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=86400)),
         vol.Optional("limit", default=2000): _LIMIT}, SupportsResponse.ONLY)
+    register("control_device", s_control_device, {
+        vol.Required("device"): cv.string, vol.Optional("active"): cv.boolean, vol.Optional("allow_write"): cv.boolean,
+        _NOTE: cv.string}, SupportsResponse.OPTIONAL)
+    register("write_signal", s_write_signal, {
+        vol.Required("device"): cv.string, vol.Required("message"): cv.string, vol.Required("signal"): cv.string,
+        vol.Required("value"): vol.Any(vol.Coerce(float), cv.string), _NOTE: cv.string}, SupportsResponse.OPTIONAL)
     _direction = vol.Optional("direction", default="rx")
     register("bit_activity", s_bit_activity, {
         vol.Required("interface"): cv.string, vol.Required("can_id"): cv.string, _direction: vol.In(["rx", "tx"]),

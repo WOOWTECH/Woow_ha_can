@@ -1,0 +1,982 @@
+{
+ "id": "cia401_io",
+ "version": 1,
+ "name": {
+  "en": "CANopen I/O module (CiA 401)",
+  "zh-Hant": "CANopen I/O 模組（CiA 401）"
+ },
+ "category": "industrial",
+ "description": {
+  "en": "Digital inputs and outputs and analogue inputs of a CiA 401 module (ICP DAS CAN-2053C / 2057C / 2017C and similar): inputs as binary sensors from TPDO1, outputs as switches over RPDO1, analogue inputs read with SDO. Outputs and the NMT start button appear only after you allow writing for the device; the analogue inputs are read only while polling is on.",
+  "zh-Hant": "CiA 401 模組（ICP DAS CAN-2053C／2057C／2017C 等）的數位輸入輸出與類比輸入：輸入由 TPDO1 變成二元感測器、輸出經 RPDO1 變成開關、類比輸入用 SDO 讀取。要在裝置上「允許寫入」後才會出現輸出開關和 NMT 啟動按鈕；開啟「主動輪詢」才會讀類比輸入。"
+ },
+ "bitrate": null,
+ "transmits": true,
+ "manufacturer": "CANopen",
+ "model": "CiA 401 I/O",
+ "default_name": {
+  "en": "I/O module",
+  "zh-Hant": "I/O 模組"
+ },
+ "source": [
+  "CiA 301 v4.02 and CiA 401 (facts only)",
+  "ICP DAS CAN-2000C series manuals (example frames)",
+  "CANopenNode (Apache-2.0)",
+  "python canopen (MIT)"
+ ],
+ "license": "Facts from public documents, written by WOOWTECH; MIT",
+ "verified": [
+  "TPDO1 / RPDO1 / SDO frames from the ICP DAS manuals (CAN-2053C, CAN-2057C, CAN-2017C)"
+ ],
+ "confidence": "high",
+ "notes": {
+  "en": "A module only sends inputs once it is operational: press NMT start (or let the PLC do it). Only one device on a bus should poll a node with SDO and send its outputs: leave writing off where a PLC controls the module. RPDO1 sends all 16 outputs at once; after a restart the outputs' last states are restored first.",
+  "zh-Hant": "模組要進入 operational 才會送輸入：按 NMT 啟動（或由 PLC 啟動）。同一條匯流排上只應有一個設備用 SDO 輪詢和送輸出：已有 PLC 控制的模組請不要允許寫入。RPDO1 一次送出全部 16 路輸出；重新啟動後會先還原輸出的最後狀態。"
+ },
+ "params": [
+  {
+   "key": "node_id",
+   "default": 1,
+   "description": {
+    "en": "Node ID (1-127)",
+    "zh-Hant": "節點編號（1–127）"
+   }
+  },
+  {
+   "key": "heartbeat_ms",
+   "default": 1000,
+   "description": {
+    "en": "The node's heartbeat period in ms (object 0x1017)",
+    "zh-Hant": "節點的 heartbeat 週期，毫秒（物件 0x1017）"
+   }
+  }
+ ],
+ "groups": [],
+ "max_rate": 10,
+ "messages": [
+  {
+   "name": "Heartbeat",
+   "can_id": "0x700 + node_id",
+   "extended": false,
+   "length": 1,
+   "cycle_ms": "heartbeat_ms",
+   "signals": [
+    {
+     "name": "State",
+     "start": 0,
+     "length": 7,
+     "byte_order": "little",
+     "signed": false,
+     "values": {
+      "0": "boot_up",
+      "4": "stopped",
+      "5": "operational",
+      "127": "pre_operational"
+     },
+     "entity": {
+      "key": "node.state",
+      "name": {
+       "en": "NMT state",
+       "zh-Hant": "NMT 狀態"
+      },
+      "icon": "mdi:state-machine"
+     }
+    },
+    {
+     "name": "Online",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "derive": {
+      "op": "present"
+     },
+     "entity": {
+      "key": "node.online",
+      "name": {
+       "en": "Online",
+       "zh-Hant": "在線"
+      },
+      "platform": "binary_sensor",
+      "device_class": "connectivity",
+      "on_timeout": "off"
+     }
+    }
+   ]
+  },
+  {
+   "name": "Inputs",
+   "can_id": "0x180 + node_id",
+   "extended": false,
+   "length": 2,
+   "comment": "TPDO1: 0x6000 read input 8-bit, sub-indices 1-2",
+   "signals": [
+    {
+     "name": "DI0",
+     "start": 0,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di0",
+      "name": {
+       "en": "Input 0",
+       "zh-Hant": "輸入 0"
+      },
+      "platform": "binary_sensor",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DI1",
+     "start": 1,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di1",
+      "name": {
+       "en": "Input 1",
+       "zh-Hant": "輸入 1"
+      },
+      "platform": "binary_sensor",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DI2",
+     "start": 2,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di2",
+      "name": {
+       "en": "Input 2",
+       "zh-Hant": "輸入 2"
+      },
+      "platform": "binary_sensor",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DI3",
+     "start": 3,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di3",
+      "name": {
+       "en": "Input 3",
+       "zh-Hant": "輸入 3"
+      },
+      "platform": "binary_sensor",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DI4",
+     "start": 4,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di4",
+      "name": {
+       "en": "Input 4",
+       "zh-Hant": "輸入 4"
+      },
+      "platform": "binary_sensor",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DI5",
+     "start": 5,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di5",
+      "name": {
+       "en": "Input 5",
+       "zh-Hant": "輸入 5"
+      },
+      "platform": "binary_sensor",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DI6",
+     "start": 6,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di6",
+      "name": {
+       "en": "Input 6",
+       "zh-Hant": "輸入 6"
+      },
+      "platform": "binary_sensor",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DI7",
+     "start": 7,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di7",
+      "name": {
+       "en": "Input 7",
+       "zh-Hant": "輸入 7"
+      },
+      "platform": "binary_sensor",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DI8",
+     "start": 8,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di8",
+      "name": {
+       "en": "Input 8",
+       "zh-Hant": "輸入 8"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DI9",
+     "start": 9,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di9",
+      "name": {
+       "en": "Input 9",
+       "zh-Hant": "輸入 9"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DI10",
+     "start": 10,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di10",
+      "name": {
+       "en": "Input 10",
+       "zh-Hant": "輸入 10"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DI11",
+     "start": 11,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di11",
+      "name": {
+       "en": "Input 11",
+       "zh-Hant": "輸入 11"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DI12",
+     "start": 12,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di12",
+      "name": {
+       "en": "Input 12",
+       "zh-Hant": "輸入 12"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DI13",
+     "start": 13,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di13",
+      "name": {
+       "en": "Input 13",
+       "zh-Hant": "輸入 13"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DI14",
+     "start": 14,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di14",
+      "name": {
+       "en": "Input 14",
+       "zh-Hant": "輸入 14"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DI15",
+     "start": 15,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.di15",
+      "name": {
+       "en": "Input 15",
+       "zh-Hant": "輸入 15"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "Outputs",
+   "can_id": "0x200 + node_id",
+   "extended": false,
+   "length": 2,
+   "send": true,
+   "comment": "RPDO1: 0x6200 write output 8-bit, sub-indices 1-2",
+   "signals": [
+    {
+     "name": "DO0",
+     "start": 0,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do0",
+      "name": {
+       "en": "Output 0",
+       "zh-Hant": "輸出 0"
+      },
+      "platform": "switch",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DO1",
+     "start": 1,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do1",
+      "name": {
+       "en": "Output 1",
+       "zh-Hant": "輸出 1"
+      },
+      "platform": "switch",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DO2",
+     "start": 2,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do2",
+      "name": {
+       "en": "Output 2",
+       "zh-Hant": "輸出 2"
+      },
+      "platform": "switch",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DO3",
+     "start": 3,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do3",
+      "name": {
+       "en": "Output 3",
+       "zh-Hant": "輸出 3"
+      },
+      "platform": "switch",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DO4",
+     "start": 4,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do4",
+      "name": {
+       "en": "Output 4",
+       "zh-Hant": "輸出 4"
+      },
+      "platform": "switch",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DO5",
+     "start": 5,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do5",
+      "name": {
+       "en": "Output 5",
+       "zh-Hant": "輸出 5"
+      },
+      "platform": "switch",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DO6",
+     "start": 6,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do6",
+      "name": {
+       "en": "Output 6",
+       "zh-Hant": "輸出 6"
+      },
+      "platform": "switch",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DO7",
+     "start": 7,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do7",
+      "name": {
+       "en": "Output 7",
+       "zh-Hant": "輸出 7"
+      },
+      "platform": "switch",
+      "enabled": true
+     }
+    },
+    {
+     "name": "DO8",
+     "start": 8,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do8",
+      "name": {
+       "en": "Output 8",
+       "zh-Hant": "輸出 8"
+      },
+      "platform": "switch",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DO9",
+     "start": 9,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do9",
+      "name": {
+       "en": "Output 9",
+       "zh-Hant": "輸出 9"
+      },
+      "platform": "switch",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DO10",
+     "start": 10,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do10",
+      "name": {
+       "en": "Output 10",
+       "zh-Hant": "輸出 10"
+      },
+      "platform": "switch",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DO11",
+     "start": 11,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do11",
+      "name": {
+       "en": "Output 11",
+       "zh-Hant": "輸出 11"
+      },
+      "platform": "switch",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DO12",
+     "start": 12,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do12",
+      "name": {
+       "en": "Output 12",
+       "zh-Hant": "輸出 12"
+      },
+      "platform": "switch",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DO13",
+     "start": 13,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do13",
+      "name": {
+       "en": "Output 13",
+       "zh-Hant": "輸出 13"
+      },
+      "platform": "switch",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DO14",
+     "start": 14,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do14",
+      "name": {
+       "en": "Output 14",
+       "zh-Hant": "輸出 14"
+      },
+      "platform": "switch",
+      "enabled": false
+     }
+    },
+    {
+     "name": "DO15",
+     "start": 15,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "io.do15",
+      "name": {
+       "en": "Output 15",
+       "zh-Hant": "輸出 15"
+      },
+      "platform": "switch",
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "NMT",
+   "can_id": "0x000",
+   "extended": false,
+   "length": 2,
+   "send": true,
+   "data": [
+    "0x01",
+    "node_id"
+   ],
+   "comment": "NMT: start remote node",
+   "signals": [
+    {
+     "name": "Command",
+     "start": 0,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "values": {
+      "1": "start",
+      "2": "stop",
+      "128": "enter_pre_operational"
+     },
+     "entity": {
+      "key": "node.start",
+      "name": {
+       "en": "Start node (NMT)",
+       "zh-Hant": "啟動節點（NMT）"
+      },
+      "platform": "button",
+      "press": "start",
+      "icon": "mdi:play"
+     }
+    }
+   ]
+  },
+  {
+   "name": "Analog_TPDO2",
+   "can_id": "0x280 + node_id",
+   "extended": false,
+   "length": 8,
+   "comment": "TPDO2: 0x6401 analogue inputs 1-4 (often off: 0x6423)",
+   "signals": [
+    {
+     "name": "AI1_PDO",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true
+    },
+    {
+     "name": "AI2_PDO",
+     "start": 16,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true
+    },
+    {
+     "name": "AI3_PDO",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true
+    },
+    {
+     "name": "AI4_PDO",
+     "start": 48,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true
+    }
+   ]
+  },
+  {
+   "name": "AI1_SDO",
+   "can_id": "0x580 + node_id",
+   "extended": false,
+   "length": 8,
+   "cycle_ms": 3000,
+   "filters": [
+    {
+     "byte": 0,
+     "values": [
+      "0x4F",
+      "0x4B",
+      "0x47",
+      "0x43",
+      "0x42"
+     ]
+    },
+    {
+     "byte": 1,
+     "value": "0x01"
+    },
+    {
+     "byte": 2,
+     "value": "0x64"
+    },
+    {
+     "byte": 3,
+     "value": "0x01"
+    }
+   ],
+   "comment": "SDO upload response 6401:01",
+   "signals": [
+    {
+     "name": "AI1",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "entity": {
+      "key": "io.ai1",
+      "name": {
+       "en": "Analogue input 1 (raw)",
+       "zh-Hant": "類比輸入 1（原始值）"
+      },
+      "enabled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "AI2_SDO",
+   "can_id": "0x580 + node_id",
+   "extended": false,
+   "length": 8,
+   "cycle_ms": 3000,
+   "filters": [
+    {
+     "byte": 0,
+     "values": [
+      "0x4F",
+      "0x4B",
+      "0x47",
+      "0x43",
+      "0x42"
+     ]
+    },
+    {
+     "byte": 1,
+     "value": "0x01"
+    },
+    {
+     "byte": 2,
+     "value": "0x64"
+    },
+    {
+     "byte": 3,
+     "value": "0x02"
+    }
+   ],
+   "comment": "SDO upload response 6401:02",
+   "signals": [
+    {
+     "name": "AI2",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "entity": {
+      "key": "io.ai2",
+      "name": {
+       "en": "Analogue input 2 (raw)",
+       "zh-Hant": "類比輸入 2（原始值）"
+      },
+      "enabled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "AI3_SDO",
+   "can_id": "0x580 + node_id",
+   "extended": false,
+   "length": 8,
+   "cycle_ms": 3000,
+   "filters": [
+    {
+     "byte": 0,
+     "values": [
+      "0x4F",
+      "0x4B",
+      "0x47",
+      "0x43",
+      "0x42"
+     ]
+    },
+    {
+     "byte": 1,
+     "value": "0x01"
+    },
+    {
+     "byte": 2,
+     "value": "0x64"
+    },
+    {
+     "byte": 3,
+     "value": "0x03"
+    }
+   ],
+   "comment": "SDO upload response 6401:03",
+   "signals": [
+    {
+     "name": "AI3",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "entity": {
+      "key": "io.ai3",
+      "name": {
+       "en": "Analogue input 3 (raw)",
+       "zh-Hant": "類比輸入 3（原始值）"
+      },
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "AI4_SDO",
+   "can_id": "0x580 + node_id",
+   "extended": false,
+   "length": 8,
+   "cycle_ms": 3000,
+   "filters": [
+    {
+     "byte": 0,
+     "values": [
+      "0x4F",
+      "0x4B",
+      "0x47",
+      "0x43",
+      "0x42"
+     ]
+    },
+    {
+     "byte": 1,
+     "value": "0x01"
+    },
+    {
+     "byte": 2,
+     "value": "0x64"
+    },
+    {
+     "byte": 3,
+     "value": "0x04"
+    }
+   ],
+   "comment": "SDO upload response 6401:04",
+   "signals": [
+    {
+     "name": "AI4",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "entity": {
+      "key": "io.ai4",
+      "name": {
+       "en": "Analogue input 4 (raw)",
+       "zh-Hant": "類比輸入 4（原始值）"
+      },
+      "enabled": false
+     }
+    }
+   ]
+  }
+ ],
+ "requests": [
+  {
+   "name": "Read AI1",
+   "can_id": "0x600 + node_id",
+   "extended": false,
+   "data": [
+    "0x40",
+    "0x01",
+    "0x64",
+    "0x01",
+    "0",
+    "0",
+    "0",
+    "0"
+   ],
+   "period_ms": 1000,
+   "reply": "AI1_SDO",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read AI2",
+   "can_id": "0x600 + node_id",
+   "extended": false,
+   "data": [
+    "0x40",
+    "0x01",
+    "0x64",
+    "0x02",
+    "0",
+    "0",
+    "0",
+    "0"
+   ],
+   "period_ms": 1000,
+   "reply": "AI2_SDO",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read AI3",
+   "can_id": "0x600 + node_id",
+   "extended": false,
+   "data": [
+    "0x40",
+    "0x01",
+    "0x64",
+    "0x03",
+    "0",
+    "0",
+    "0",
+    "0"
+   ],
+   "period_ms": 1000,
+   "reply": "AI3_SDO",
+   "timeout_ms": 300
+  },
+  {
+   "name": "Read AI4",
+   "can_id": "0x600 + node_id",
+   "extended": false,
+   "data": [
+    "0x40",
+    "0x01",
+    "0x64",
+    "0x04",
+    "0",
+    "0",
+    "0",
+    "0"
+   ],
+   "period_ms": 1000,
+   "reply": "AI4_SDO",
+   "timeout_ms": 300
+  }
+ ]
+}
