@@ -1,0 +1,360 @@
+"""Websocket commands behind the panel (admin only)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import voluptuous as vol
+
+from homeassistant.components import websocket_api
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
+
+from .admin import AdminHub
+from .can_port import CanFrame, IdMatcher, parse_id
+from .capture import trace_matcher
+from .const import CONF_EVENT_FILTER, CONF_MAX_RATE, DOMAIN, TRACE_PAGE
+from .periodic import PeriodicError
+
+_COMMANDS: list[Any] = []
+
+
+def _command(func: Any) -> Any:
+    _COMMANDS.append(func)
+    return func
+
+
+@callback
+def async_register(hass: HomeAssistant) -> None:
+    for handler in _COMMANDS:
+        websocket_api.async_register_command(hass, handler)
+
+
+def _admin(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> AdminHub | None:
+    admin = hass.data.get(DOMAIN, {}).get("admin")
+    if admin is None:
+        connection.send_error(msg["id"], "not_loaded", "The WOOW CAN panel entry is not loaded")
+    return admin
+
+
+async def _log(admin: AdminHub, connection: websocket_api.ActiveConnection, action: str, msg: str,
+               args: dict[str, Any], **extra: Any) -> None:
+    """Panel changes go to the activity log next to the agents' ones."""
+    user = connection.user.name if connection.user is not None else None
+    await admin.activity.async_record("panel", action, msg, args, user=user, **extra)
+
+
+def _name(admin: AdminHub, entry_id: str) -> str:
+    hub = admin.hubs.get(entry_id)
+    return hub.name if hub else "?"
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "woow_can/snapshot"})
+@callback
+def ws_snapshot(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is not None:
+        connection.send_result(msg["id"], admin.snapshot())
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "woow_can/subscribe"})
+@callback
+def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Live feed: {"kind": "interfaces" | "periodic" | "activity" | "captures" | "offline", ...}."""
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+
+    @callback
+    def forward(kind: str, payload: dict[str, Any]) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], {"kind": kind, **payload}))
+
+    connection.subscriptions[msg["id"]] = admin.subscribe(forward)
+    connection.send_result(msg["id"])
+
+
+# ---- monitor -------------------------------------------------------------------------------
+def _viewers(hass: HomeAssistant) -> dict[tuple[int, str], Any]:
+    return hass.data.setdefault(DOMAIN, {}).setdefault("ws_viewers", {})
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/monitor/subscribe",
+    vol.Required("source"): str,
+    vol.Required("token"): vol.All(str, vol.Length(min=1, max=64)),
+})
+@callback
+def ws_monitor_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Per-ID batches of one interface; acknowledge each with woow_can/monitor/ack and the same token."""
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+
+    @callback
+    def forward(payload: dict[str, Any]) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], payload))
+
+    connection.send_result(msg["id"])
+    try:
+        viewer, unsub = admin.subscribe_monitor(msg["source"], forward)
+    except HomeAssistantError as err:
+        forward({"gone": True, "error": str(err)})
+        return
+    key = (id(connection), msg["token"])
+    _viewers(hass)[key] = viewer
+
+    @callback
+    def cancel() -> None:
+        unsub()
+        _viewers(hass).pop(key, None)
+
+    connection.subscriptions[msg["id"]] = cancel
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/monitor/ack",
+    vol.Required("token"): str,
+    vol.Required("seq"): int,
+})
+@callback
+def ws_monitor_ack(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    viewer = _viewers(hass).get((id(connection), msg["token"]))
+    if viewer is not None:
+        viewer.acked = max(viewer.acked, min(msg["seq"], viewer.seq))
+    connection.send_result(msg["id"])
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "woow_can/monitor/clear", vol.Required("source"): str})
+@websocket_api.async_response
+async def ws_monitor_clear(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        src = admin.source(msg["source"])
+    except HomeAssistantError as err:
+        connection.send_error(msg["id"], "not_found", str(err))
+        return
+    src.monitor.clear()
+    if getattr(src, "live", True):
+        src.load.reset_peak()
+        await _log(admin, connection, "clear_monitor", "monitor_cleared", {"port": src.name}, port_id=msg["source"])
+    connection.send_result(msg["id"])
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/trace",
+    vol.Required("source"): str,
+    vol.Optional("before"): vol.Any(None, int),
+    vol.Optional("limit", default=TRACE_PAGE): vol.All(int, vol.Range(min=1, max=2000)),
+    vol.Optional("ids", default=""): str,
+    vol.Optional("direction"): vol.Any(None, "rx", "tx"),
+    vol.Optional("errors", default=True): bool,
+})
+@websocket_api.async_response
+async def ws_trace(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """A page of the time-ordered view, newest first: [seq, time, raw id, flags, data hex] per frame."""
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        src = admin.source(msg["source"])
+        ids = IdMatcher(msg["ids"]) if msg["ids"].strip() else None
+    except (HomeAssistantError, ValueError) as err:
+        connection.send_error(msg["id"], "invalid", str(err))
+        return
+    match = trace_matcher(ids, msg.get("direction"), msg["errors"])
+    snapshot = src.trace.snapshot()
+    page = await hass.async_add_executor_job(snapshot.page, msg.get("before"), msg["limit"], match)
+    connection.send_result(msg["id"], {**page, "frames": [f.as_list() for f in page["frames"]]})
+
+
+# ---- sending -------------------------------------------------------------------------------
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/send",
+    vol.Required("entry_id"): str,
+    vol.Required("frame"): str,
+    vol.Optional("wait_ms", default=0): vol.All(int, vol.Range(min=0, max=60000)),
+    vol.Optional("wait_id"): str,
+})
+@websocket_api.async_response
+async def ws_send(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    hub = admin.hubs.get(msg["entry_id"])
+    if hub is None:
+        connection.send_error(msg["id"], "not_found", "The interface is not loaded")
+        return
+    try:
+        frame = CanFrame.parse(msg["frame"])
+        match = None
+        if msg.get("wait_id"):
+            want_id, want_ext = parse_id(msg["wait_id"])
+            match = lambda f: f.can_id == want_id and f.extended == want_ext  # noqa: E731
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    wait = msg["wait_ms"] / 1000
+    try:
+        reply = await hub.async_send(frame, wait, match)
+    except HomeAssistantError as err:
+        await _log(admin, connection, "send", "send_failed", {"frame": str(frame), "port": hub.name,
+                                                               "error": str(err)}, ok=False, port_id=hub.entry.entry_id)
+        connection.send_error(msg["id"], "send_failed", str(err))
+        return
+    await _log(admin, connection, "send", "sent", {"frame": str(frame), "port": hub.name}, port_id=hub.entry.entry_id)
+    connection.send_result(msg["id"], {"sent": frame.as_dict(), "reply": reply.as_dict() if reply else None,
+                                       "timeout": wait > 0 and reply is None})
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/interface/events",
+    vol.Required("entry_id"): str,
+    vol.Required("event_filter"): str,
+    vol.Optional("max_events_per_sec"): vol.All(int, vol.Range(min=1, max=1000)),
+})
+@callback
+def ws_interface_events(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Change which IDs fire woow_can_frame events (applies without restarting the interface)."""
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    if entry is None or entry.domain != DOMAIN:
+        connection.send_error(msg["id"], "not_found", "No such interface")
+        return
+    try:
+        IdMatcher(msg["event_filter"])
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    options = {**entry.options, CONF_EVENT_FILTER: msg["event_filter"].strip()}
+    if "max_events_per_sec" in msg:
+        options[CONF_MAX_RATE] = msg["max_events_per_sec"]
+    hass.config_entries.async_update_entry(entry, options=options)
+    connection.send_result(msg["id"])
+
+
+# ---- periodic sends ------------------------------------------------------------------------
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "woow_can/periodic/save", vol.Required("item"): dict})
+@websocket_api.async_response
+async def ws_periodic_save(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        item = admin.periodic.save(msg["item"])
+    except PeriodicError as err:
+        connection.send_error(msg["id"], err.code, str(err))
+        return
+    await _log(admin, connection, "save_periodic", "periodic_saved",
+               {"name": item.name, "frame": item.frame, "period": item.period_ms, "port": _name(admin, item.entry_id)},
+               port_id=item.entry_id)
+    connection.send_result(msg["id"], admin.periodic.item_view(item.id))
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/periodic/control",
+    vol.Required("item_id"): str,
+    vol.Required("action"): vol.In(["start", "stop", "delete"]),
+})
+@websocket_api.async_response
+async def ws_periodic_control(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    item = admin.periodic.items.get(msg["item_id"])
+    if item is None:
+        connection.send_error(msg["id"], "not_found", "No such periodic send")
+        return
+    action = msg["action"]
+    if action == "start":
+        hub = admin.hubs.get(item.entry_id)
+        if hub is None:
+            connection.send_error(msg["id"], "not_found", "The interface is not loaded")
+            return
+        try:
+            hub.check_can_send(CanFrame.parse(item.frame))
+        except HomeAssistantError as err:
+            connection.send_error(msg["id"], "cannot_send", str(err))
+            return
+        admin.periodic.start(item.id)
+        await _log(admin, connection, "start_periodic", "periodic_started", {"name": item.name, "port": hub.name},
+                   port_id=item.entry_id)
+    elif action == "stop":
+        sent = admin.periodic.item_view(item.id)["sent"]
+        admin.periodic.stop(item.id, "user")
+        await _log(admin, connection, "stop_periodic", "periodic_stopped", {"name": item.name, "sent": sent},
+                   port_id=item.entry_id)
+    else:
+        admin.periodic.delete(item.id)
+        await _log(admin, connection, "delete_periodic", "periodic_deleted", {"name": item.name}, port_id=item.entry_id)
+    connection.send_result(msg["id"])
+
+
+# ---- captures ------------------------------------------------------------------------------
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "woow_can/capture/list"})
+@websocket_api.async_response
+async def ws_capture_list(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    connection.send_result(msg["id"], {"captures": await admin.async_list_captures(),
+                                       "offline": [s.info() for s in admin.offline.values()]})
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/capture/control",
+    vol.Required("action"): vol.In(["start", "stop", "delete", "open", "close"]),
+    vol.Optional("entry_id"): str,
+    vol.Optional("name"): str,
+    vol.Optional("source"): str,
+})
+@websocket_api.async_response
+async def ws_capture_control(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    action = msg["action"]
+    result: dict[str, Any] = {}
+    try:
+        if action in ("start", "stop"):
+            entry_id = msg.get("entry_id") or ""
+            hub = admin.hubs.get(entry_id)
+            if hub is None:
+                raise HomeAssistantError("The interface is not loaded")
+            if action == "start":
+                rec = await admin.async_start_capture(entry_id)
+                result["name"] = rec.name
+                await _log(admin, connection, "start_capture", "capture_started", {"file": rec.name, "port": hub.name},
+                           port_id=entry_id)
+            else:
+                rec = await admin.async_stop_capture(entry_id)
+                if rec is not None:
+                    result["name"] = rec.name
+                    await _log(admin, connection, "stop_capture", "capture_stopped",
+                               {"file": rec.name, "frames": rec.frames}, port_id=entry_id)
+        elif action == "delete":
+            await admin.async_delete_capture(msg.get("name") or "")
+            await _log(admin, connection, "delete_capture", "capture_deleted", {"file": msg.get("name")})
+        elif action == "open":
+            opened = await admin.async_open_capture(msg.get("name") or "")
+            result["sources"] = [s.info() for s in opened]
+        else:
+            admin.close_offline(msg.get("source") or "")
+    except (HomeAssistantError, ValueError, OSError) as err:
+        connection.send_error(msg["id"], "failed", str(err))
+        return
+    connection.send_result(msg["id"], result)

@@ -1,32 +1,64 @@
 # WOOW CAN
 
-[繁體中文](README.md)
+[中文](README.md)
 
-Brings Linux SocketCAN interfaces (CAN / CAN FD) into Home Assistant: one device per interface to send and receive frames and watch the bus state, with received frames available as automation triggers. No extra packages.
+Brings Linux SocketCAN interfaces (CAN / CAN FD) into Home Assistant: one device per interface, plus an admin panel to watch the whole bus per ID, check bus health, send and repeat frames, and record log files. Whatever the panel does, an AI agent can do through services, and it is written to the activity log. No extra packages to install.
 
-For RS485 / RS232, use [WOOW Serial](https://github.com/WOOWTECH/Woow_ha_serial).
+For RS485 / RS232 use [WOOW Serial](https://github.com/WOOWTECH/Woow_ha_serial).
 
-## Features
+## Admin panel
 
-- Finds the host's CAN interfaces (MCP2515, MCP2518FD, ...).
-- Interface settings: bitrate, CAN FD and data bitrate (on FD-capable controllers), listen-only, restart after bus-off, receive filter (`123, 7E0/7F0, 18FF50E5`), max events per second.
-  - HAOS's `ip` cannot set CAN bitrates, so this integration sets them over netlink itself.
-- Entities per interface:
+"WOOW CAN" in the sidebar (admins), with five tabs:
+
+| Tab | What it shows |
+|---|---|
+| Overview | A health card per interface: state (normal / error warning / error passive / bus off), TEC / REC, bus load (now, peak, 1 / 5 / 15 min, with a sparkline of the last minutes), frame rates, controller events, drops, the last error frame in plain words, and hints such as "nothing acknowledges" |
+| Monitor | One row per ID, like cansniffer or SavvyCAN: a changed byte lights up and fades, cyan rising, red falling, grey-violet for bytes that keep jumping (counters, checksums); Notch masks the bits that always change, so only what you operate lights up; filter, pin, binary view. Paused, it shows the frames in time order and pages back through them. On a phone each ID is a card |
+| Send | One frame in cansend notation (optionally waiting for a reply ID); a list of periodic sends (period, count, start / stop). The first send on an interface asks for confirmation |
+| Recordings | Record an interface to a candump log, download the buffer (the last 200,000 frames), upload a log and open it in the same monitor views |
+| Activity | Sends and changes by AI agents (services) and people (panel), with the user and the note |
+
+The panel gets a batch every 250 ms and must acknowledge each one before the next is sent, so on a busy bus a phone just updates less often instead of being disconnected by Home Assistant.
+
+## Interface settings
+
+- Finds the host's CAN interfaces (MCP2515, MCP2518FD, …).
+- Bitrate, CAN FD and data bitrate (on capable controllers), listen-only (on by default for new interfaces), restart after bus-off, receive filter (`123, 7E0/7F0, 18FF50E5`).
+  - HAOS's `ip` cannot set CAN bit timing; the integration does it over netlink.
+- **IDs that fire events**: only these IDs fire `woow_can_frame` events and the event entity, e.g. `123, 7E0/7F0, 100-1FF`; `*` = all; empty = none (the default). Changing it applies at once, without restarting the interface.
+- **Virtual interface (vcan)**: choose "Virtual interface" when adding the integration to try the panel, automations and agents without hardware; it is re-created after the host restarts.
+
+## Entities
 
 | Entity | Purpose |
 |---|---|
-| `text.<if>_send_frame` | Type a frame in cansend notation and it is sent: `123#11223344`, `18FF50E5#0102`, `123#R`, `456##1AABB` (CAN FD) |
-| `sensor.<if>_last_frame` / `_last_sent_frame` | Last received / sent frame; ID, data and length in the attributes |
-| `sensor.<if>_bus_state` | Error active, error warning, error passive, bus off, stopped |
-| `event.<if>_rx_frame` | Fires once per received frame |
+| `text.<interface>_send_frame` | Type a frame to send it, cansend notation: `123#11223344`, `18FF50E5#0102`, `123#R`, `456##1AABB` (CAN FD) |
+| `sensor.<interface>_bus_state` | Error active, error warning, error passive, bus off, stopped, virtual |
+| `event.<interface>_rx_frame` | Fires for the IDs that fire events |
+| `sensor.<interface>_last_frame` / `_last_sent_frame` | Last received / sent frame, at most one update a second. Disabled by default for new interfaces |
+| `sensor.<interface>_bus_load` | Bus load (one-minute average). Disabled by default |
 | Frame counters, bus errors | Diagnostics |
 
-- Service `woow_can.send`: send one frame, optionally waiting for a reply ID (`wait_id`, `wait_ms`); the reply comes back in the service response.
-- Event `woow_can_frame` for every received frame, with `name`, `interface`, `id`, `id_hex`, `data`, `length`, `extended`, `fd`, `brs`, `rtr`.
+## Services (for AI agents too)
+
+| Service | Purpose |
+|---|---|
+| `describe`, `list_interfaces` | What the integration does; each interface's state, load and error counters |
+| `get_monitor` | Per-ID summary: count, rate, period, latest data, number of data changes |
+| `get_trace` | Frames in time order, newest first; filter by IDs, direction or the last seconds |
+| `get_activity`, `list_periodic`, `list_captures` | Activity log, periodic sends, recordings |
+| `send` | Send a frame, optionally waiting for a reply (`wait_id`, `wait_ms`); `frame: 7DF#02010C` or `can_id` with `data` |
+| `save_periodic`, `control_periodic` | Add or change a periodic send; start, stop, delete |
+| `capture` | Start or stop a recording |
+| `clear_monitor` | Start an interface's monitor statistics over |
+
+- Interfaces can be named by config entry id, name (CAN0) or interface (can0).
+- Sending and changing settings need an admin user; reading does not. Every send and change goes to the activity log; `note` says why.
+- Home Assistant's own MCP server: the same services are the tools of the LLM API "WOOW CAN". Guidance for agents: [llms.txt](llms.txt).
 
 ## Requirements
 
-- Home Assistant 2026.10 or later on a host with SocketCAN interfaces (e.g. a Raspberry Pi 5 with a CAN HAT enabled in HAOS's `config.txt`).
+- Home Assistant 2026.10 or newer, and a host with SocketCAN interfaces (e.g. a Raspberry Pi 5 with a CAN HAT enabled in HAOS's `config.txt`). Without hardware, use a virtual interface.
 
 ## Installation
 
@@ -34,9 +66,11 @@ For RS485 / RS232, use [WOOW Serial](https://github.com/WOOWTECH/Woow_ha_serial)
 
 **Manual**: copy `custom_components/woow_can` into `custom_components/` and restart.
 
-Then Settings → Devices & services → Add integration → WOOW CAN, pick the interface and set the bitrate.
+Then Settings → Devices & services → Add integration → WOOW CAN → "CAN interface on this host", and set the bitrate. The "Admin panel" entry is added automatically the first time.
 
 ## Examples
+
+Run an automation when ID 18FF50E5 arrives (first put `18FF50E5` in the interface's "IDs that fire events"):
 
 ```yaml
 triggers:
@@ -47,30 +81,69 @@ triggers:
       id_hex: "18FF50E5"
 ```
 
+Send an OBD-II request and wait for the answer:
+
 ```yaml
 action: woow_can.send
 data:
-  config_entry_id: <the interface>
-  can_id: "7DF"
-  data: "02 01 0C"
+  interface: CAN0
+  frame: "7DF#02010C"
   wait_id: "7E8"
   wait_ms: 500
 response_variable: r   # r.reply.data
 ```
 
+A heartbeat every second, stopping after 60 sends:
+
+```yaml
+action: woow_can.save_periodic
+data:
+  interface: CAN0
+  name: Heartbeat
+  frame: "305#0000000000000000"
+  period_ms: 1000
+  count: 60
+  start: true
+```
+
+## Database and performance
+
+- The monitor, the trace and the load estimate live in memory; nothing goes to the database or through Home Assistant's event bus.
+- Only the IDs that fire events produce events, and every event is written to the history database. To just watch in the panel, leave the list empty.
+- To fire events for a busy ID, keep them out of the recorder:
+
+```yaml
+recorder:
+  exclude:
+    event_types:
+      - woow_can_frame
+```
+
+- A full 500 kbit/s bus carries about 3,100–4,500 frames/s per interface; each frame costs a fixed, small amount of work.
+
 ## Notes
 
-- With no other node on the bus, nothing acknowledges a frame: the controller keeps retransmitting and goes error passive. Reloading the interface clears it.
-- Terminate both ends of the bus with 120 Ω and use one bitrate on every node.
-- On busy buses, use the receive filter and the events-per-second limit; frames beyond it are only counted.
+- With no other node on the bus, nobody acknowledges a sent frame: the state goes error passive and the controller keeps retrying. Reload the interface to clear it.
+- Terminate both ends of the bus with 120 Ω; every node must use the same bitrate.
+- Listen-only never acknowledges. If the only other node on the bus needs this host's acknowledgement, turn listen-only off.
+- The MCP2515 has two receive buffers and loses frames on a busy bus (the overview shows controller overflows); it does not report bus errors either ("not reported by this controller").
+- Periodic sends are stopped after Home Assistant restarts: a reboot never starts transmitting on its own.
+
+## Upgrading from 0.1
+
+- Existing interfaces get `*` as "IDs that fire events", so every frame still fires an event (up to 20 a second). Narrow it, or clear it, to write less to the database.
+- The last-frame sensors no longer carry a `time` attribute, their attributes are not recorded, and they update at most once a second.
 
 ## Development
 
 ```bash
 pip install homeassistant==2026.10.1 pytest && pytest tests
+cd frontend && npm install && npm run build   # the panel (Lit), built into custom_components/woow_can/frontend
 ```
 
-`tools/check_can.py` is the on-device check, including a controller loopback test.
+- `tools/check_can.py`: hardware check, including the controller's internal loopback.
+- `tools/sim/can_sim.py`: a Pylontech battery, an inverter, a J1939 engine and an OBD-II ECU on a virtual interface.
+- `tools/can_live_check.py`: end-to-end check against a running Home Assistant, from the SSH add-on (services, panel websocket, periodic sends, events, recordings).
 
 ## License
 

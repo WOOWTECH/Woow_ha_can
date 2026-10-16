@@ -1,39 +1,178 @@
+describe:
+  name: Describe WOOW CAN
+  description: 'For AI agents: what this integration does, the frame notation, the workflow and the interfaces with
+    their health. Call it first. Call it with return_response: true.'
+list_interfaces:
+  name: List CAN interfaces
+  description: 'The interfaces with state (error_active = healthy), bus load, error counters, drops and the last
+    error frame. Call it with return_response: true.'
+get_monitor:
+  name: Get the per-ID monitor
+  description: 'One row per CAN ID and direction: count, rate, period, latest data and how often the data changed.
+    Call it with return_response: true.'
+  fields:
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id; empty = all.
+      example: CAN0
+      selector:
+        text: null
+    ids:
+      name: IDs
+      description: 'Only these IDs: 123, 18FF50E5, 7E0/7F0, 100-1FF.'
+      example: 351-35F, 18FF50E5
+      selector:
+        text: null
+    limit:
+      name: Limit
+      description: Rows per interface.
+      default: 200
+      selector:
+        number:
+          min: 1
+          max: 2000
+          mode: box
+get_trace:
+  name: Get the frame trace
+  description: 'Frames in time order, newest first, from the interface''s buffer of recent frames. Call it with
+    return_response: true.'
+  fields:
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    ids:
+      name: IDs
+      description: 'Only these IDs: 123, 18FF50E5, 7E0/7F0, 100-1FF.'
+      example: 7DF, 7E8
+      selector:
+        text: null
+    direction:
+      name: Direction
+      description: rx = received, tx = sent from this host.
+      selector:
+        select:
+          options:
+          - rx
+          - tx
+    limit:
+      name: Limit
+      description: Frames to return.
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 2000
+          mode: box
+    before:
+      name: Before
+      description: 'Continue an earlier call: its next_before.'
+      selector:
+        number:
+          min: 0
+          max: 1000000000000
+          mode: box
+    seconds:
+      name: Last seconds
+      description: Only frames from the last this many seconds.
+      example: 10
+      selector:
+        number:
+          min: 0.001
+          max: 86400
+          step: 0.001
+          unit_of_measurement: s
+          mode: box
+get_activity:
+  name: Get the activity log
+  description: 'Who sent what or changed what, newest first. Call it with return_response: true.'
+  fields:
+    limit:
+      name: Limit
+      description: Entries to return.
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 2000
+          mode: box
+list_periodic:
+  name: List periodic sends
+  description: 'The periodic sends with their state. Call it with return_response: true.'
+list_captures:
+  name: List recordings
+  description: 'Recorded candump log files. Call it with return_response: true.'
 send:
+  name: Send CAN frame
+  description: Send one CAN / CAN FD frame, optionally waiting for a reply ID. Admin only; the interface must not
+    be listen-only.
   fields:
     config_entry_id:
-      required: true
+      name: Interface
+      description: The CAN interface to send on.
       selector:
         config_entry:
           integration: woow_can
+    interface:
+      name: Interface name
+      description: 'Instead of the entry: name (CAN0) or interface (can0).'
+      example: CAN0
+      selector:
+        text: null
+    frame:
+      name: Frame
+      description: 'The whole frame in cansend notation: 123#11223344, 18FF50E5#01, 456##1AABB (CAN FD). Instead
+        of CAN ID and data.'
+      example: 7DF#02010C
+      selector:
+        text: null
     can_id:
-      required: true
-      example: "123"
+      name: CAN ID
+      description: Hex. 1-3 digits = 11-bit, longer = 29-bit.
+      example: '123'
       selector:
-        text:
+        text: null
     data:
-      example: "11 22 33 44"
+      name: Data
+      description: 'Hex bytes: up to 8 (classic) or 64 (CAN FD).'
+      example: 11 22 33 44
       selector:
-        text:
+        text: null
     extended:
+      name: Extended ID
+      description: 'Force a 29-bit ID (default: decided by the ID length).'
       selector:
-        boolean:
+        boolean: null
     fd:
+      name: CAN FD
+      description: Send as a CAN FD frame (CAN FD must be on for the interface).
       default: false
       selector:
-        boolean:
+        boolean: null
     brs:
+      name: Bit rate switch
+      description: 'CAN FD: send the data phase at the data bitrate.'
       default: false
       selector:
-        boolean:
+        boolean: null
     rtr:
+      name: Remote frame
+      description: Send a remote (RTR) frame.
       default: false
       selector:
-        boolean:
+        boolean: null
     wait_id:
-      example: "7E8"
+      name: Reply ID
+      description: Return the first received frame with this ID (waits 1 s unless wait_ms is set).
+      example: 7E8
       selector:
-        text:
+        text: null
     wait_ms:
+      name: Wait for reply
+      description: 0 = do not wait; without a reply ID any received frame counts.
       default: 0
       selector:
         number:
@@ -42,3 +181,136 @@ send:
           step: 10
           unit_of_measurement: ms
           mode: box
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null
+save_periodic:
+  name: Save a periodic send
+  description: Add or change a frame that is sent every period_ms. Saved sends are stopped after a restart. Admin
+    only.
+  fields:
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    frame:
+      name: Frame
+      description: cansend notation, e.g. 305#0000000000000000.
+      required: true
+      example: 305#0000000000000000
+      selector:
+        text: null
+    period_ms:
+      name: Period
+      description: 10 ms or more.
+      required: true
+      example: 1000
+      selector:
+        number:
+          min: 10
+          max: 3600000
+          unit_of_measurement: ms
+          mode: box
+    count:
+      name: Count
+      description: Stop after this many sends; 0 = until stopped.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 100000000
+          mode: box
+    name:
+      name: Name
+      description: 'Shown in the panel; default: the frame.'
+      example: Inverter keep-alive
+      selector:
+        text: null
+    item:
+      name: Existing send
+      description: Name or id of a send to change.
+      selector:
+        text: null
+    start:
+      name: Start now
+      description: Start sending right after saving.
+      default: false
+      selector:
+        boolean: null
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null
+control_periodic:
+  name: Start, stop or delete a periodic send
+  description: Admin only.
+  fields:
+    item:
+      name: Periodic send
+      description: Its name or id.
+      required: true
+      example: Inverter keep-alive
+      selector:
+        text: null
+    action:
+      name: Action
+      description: start, stop or delete.
+      required: true
+      selector:
+        select:
+          options:
+          - start
+          - stop
+          - delete
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null
+capture:
+  name: Start or stop a recording
+  description: Record an interface's frames to a candump log file under <config>/woow_can/captures. Admin only.
+  fields:
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    action:
+      name: Action
+      description: start or stop.
+      required: true
+      selector:
+        select:
+          options:
+          - start
+          - stop
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null
+clear_monitor:
+  name: Clear the monitor
+  description: Start the per-ID statistics of an interface over. Admin only.
+  fields:
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null

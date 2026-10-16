@@ -2,13 +2,23 @@
   "config": {
     "step": {
       "user": {
+        "title": "新增 WOOW CAN",
+        "menu_options": {
+          "interface": "這台主機的 CAN 介面",
+          "virtual": "虛擬介面（vcan，測試用）",
+          "hub": "管理面板"
+        }
+      },
+      "interface": {
         "title": "新增 CAN 介面",
         "description": "選擇要加入的 CAN 介面。已加入的介面不會列出。",
-        "data": { "port": "介面" }
+        "data": {
+          "port": "介面"
+        }
       },
       "can": {
         "title": "CAN 介面 {port}",
-        "description": "驅動程式：{driver}。同一條匯流排上的設備速率要一致。",
+        "description": "驅動程式：{driver}。同一條匯流排上的設備速率要一致。新加入的介面預設只監聽。",
         "data": {
           "name": "名稱",
           "bitrate": "速率",
@@ -17,29 +27,44 @@
           "listen_only": "只監聽",
           "restart_ms": "Bus-off 後自動重啟",
           "filters": "接收過濾",
+          "event_filter": "觸發事件的 ID",
           "max_events_per_sec": "每秒最多事件數"
         },
         "data_description": {
-          "listen_only": "不回 ACK 也不發送，用來監看既有匯流排而不干擾。",
+          "listen_only": "不回 ACK 也不發送，用來監看既有匯流排而不干擾。要發送時請關掉；匯流排上如果只有對方一個節點，它需要這台主機回 ACK，也要關掉。",
           "restart_ms": "0＝不自動重啟，要重新載入才會恢復。",
           "filters": "只接收這些 ID，用逗號分隔：123（11-bit）、18FF50E5（29-bit）、7E0/7F0（ID/遮罩）。空白＝全部接收。",
-          "max_events_per_sec": "超過這個速率的訊框只計數，不更新實體也不觸發事件，避免拖慢 HA。"
+          "event_filter": "收到這些 ID 的訊框時，才觸發 woow_can_frame 事件和事件實體：123、18FF50E5、7E0/7F0、100-1FF，*＝全部。空白＝都不觸發（管理面板的監看仍會顯示全部）。每個事件都會寫進歷史資料庫。",
+          "max_events_per_sec": "超過這個速率的事件只計數、不觸發，避免拖慢 HA。"
+        }
+      },
+      "virtual": {
+        "title": "建立虛擬介面",
+        "description": "不接硬體的 CAN 介面（vcan），用來試管理面板、自動化和 AI。這台主機上任何程式在它上面送出的訊框，其他程式都收得到。主機重開機後會自動重建，刪除這個項目時一併刪除。",
+        "data": {
+          "port": "介面名稱"
+        },
+        "data_description": {
+          "port": "vcan 加數字，例如 vcan0。"
         }
       }
     },
     "error": {
-      "bad_filter": "過濾格式錯誤。請用十六進位 ID，可加 /遮罩，以逗號分隔。"
+      "bad_filter": "過濾格式錯誤。請用十六進位 ID，可加 /遮罩，以逗號分隔。",
+      "bad_event_filter": "ID 清單格式錯誤。請用十六進位 ID、ID/遮罩、起-迄範圍或 *，以逗號分隔。",
+      "bad_vcan_name": "請用 vcan 加數字，例如 vcan0。",
+      "vcan_failed": "無法建立虛擬介面（主機的 kernel 需要 vcan 模組）。"
     },
     "abort": {
       "already_configured": "這個介面已經加入過了。",
-      "no_interfaces": "找不到還沒加入的 CAN 介面。"
+      "no_interfaces": "找不到還沒加入的 CAN 介面。沒有硬體也想試用的話，可以新增虛擬介面。"
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "介面設定",
-        "description": "{port}",
+        "description": "{port}。只改觸發事件的 ID 或事件速率會立即生效；改其他設定會重新啟動介面。",
         "data": {
           "bitrate": "速率",
           "fd": "CAN FD",
@@ -47,24 +72,38 @@
           "listen_only": "只監聽",
           "restart_ms": "Bus-off 後自動重啟",
           "filters": "接收過濾",
+          "event_filter": "觸發事件的 ID",
           "max_events_per_sec": "每秒最多事件數"
         },
         "data_description": {
-          "filters": "逗號分隔：123、18FF50E5、7E0/7F0。空白＝全部接收。"
+          "listen_only": "不回 ACK 也不發送，用來監看既有匯流排而不干擾。要發送時請關掉；匯流排上如果只有對方一個節點，它需要這台主機回 ACK，也要關掉。",
+          "restart_ms": "0＝不自動重啟，要重新載入才會恢復。",
+          "filters": "只接收這些 ID，用逗號分隔：123（11-bit）、18FF50E5（29-bit）、7E0/7F0（ID/遮罩）。空白＝全部接收。",
+          "event_filter": "收到這些 ID 的訊框時，才觸發 woow_can_frame 事件和事件實體：123、18FF50E5、7E0/7F0、100-1FF，*＝全部。空白＝都不觸發（管理面板的監看仍會顯示全部）。每個事件都會寫進歷史資料庫。",
+          "max_events_per_sec": "超過這個速率的事件只計數、不觸發，避免拖慢 HA。"
         }
       }
     },
     "error": {
-      "bad_filter": "過濾格式錯誤。請用十六進位 ID，可加 /遮罩，以逗號分隔。"
+      "bad_filter": "過濾格式錯誤。請用十六進位 ID，可加 /遮罩，以逗號分隔。",
+      "bad_event_filter": "ID 清單格式錯誤。請用十六進位 ID、ID/遮罩、起-迄範圍或 *，以逗號分隔。",
+      "bad_vcan_name": "請用 vcan 加數字，例如 vcan0。",
+      "vcan_failed": "無法建立虛擬介面（主機的 kernel 需要 vcan 模組）。"
     }
   },
   "entity": {
     "text": {
-      "send_frame": { "name": "發送訊框" }
+      "send_frame": {
+        "name": "發送訊框"
+      }
     },
     "sensor": {
-      "last_frame": { "name": "最後接收訊框" },
-      "last_sent_frame": { "name": "最後發送訊框" },
+      "last_frame": {
+        "name": "最後接收訊框"
+      },
+      "last_sent_frame": {
+        "name": "最後發送訊框"
+      },
       "bus_state": {
         "name": "匯流排狀態",
         "state": {
@@ -73,39 +112,299 @@
           "error_passive": "錯誤被動",
           "bus_off": "Bus off（已離線）",
           "stopped": "已停止",
-          "sleeping": "休眠"
+          "sleeping": "休眠",
+          "virtual": "虛擬介面"
         }
       },
-      "rx_frames": { "name": "接收訊框數" },
-      "tx_frames": { "name": "發送訊框數" },
-      "bus_errors": { "name": "匯流排錯誤" }
+      "rx_frames": {
+        "name": "接收訊框數"
+      },
+      "tx_frames": {
+        "name": "發送訊框數"
+      },
+      "bus_errors": {
+        "name": "匯流排錯誤"
+      },
+      "bus_load": {
+        "name": "匯流排負載"
+      }
     },
     "event": {
-      "rx_frame": { "name": "收到訊框", "state_attributes": { "event_type": { "state": { "frame": "訊框" } } } }
+      "rx_frame": {
+        "name": "收到訊框",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "frame": "訊框"
+            }
+          }
+        }
+      }
     }
   },
   "services": {
+    "describe": {
+      "name": "說明 WOOW CAN",
+      "description": "給 AI 用：說明這個整合的用途、訊框寫法、操作流程，並列出各介面與健康狀態。請先呼叫這個。要加 return_response: true。"
+    },
+    "list_interfaces": {
+      "name": "列出 CAN 介面",
+      "description": "列出各介面的狀態（error_active＝正常）、匯流排負載、錯誤計數、丟包與最後一筆錯誤訊框。要加 return_response: true。"
+    },
+    "get_monitor": {
+      "name": "讀取依 ID 監看",
+      "description": "每個 CAN ID（分收發方向）一列：次數、頻率、週期、最新資料、資料變化次數。要加 return_response: true。",
+      "fields": {
+        "interface": {
+          "name": "介面",
+          "description": "名稱（CAN0）、介面（can0）或設定項目 ID；空白＝全部。"
+        },
+        "ids": {
+          "name": "ID",
+          "description": "只看這些 ID：123、18FF50E5、7E0/7F0、100-1FF。"
+        },
+        "limit": {
+          "name": "筆數上限",
+          "description": "每個介面最多幾列。"
+        }
+      }
+    },
+    "get_trace": {
+      "name": "讀取時間序紀錄",
+      "description": "依時間排列的訊框（新的在前），取自介面最近訊框的緩衝。要加 return_response: true。",
+      "fields": {
+        "interface": {
+          "name": "介面",
+          "description": "名稱（CAN0）、介面（can0）或設定項目 ID。"
+        },
+        "ids": {
+          "name": "ID",
+          "description": "只看這些 ID：123、18FF50E5、7E0/7F0、100-1FF。"
+        },
+        "direction": {
+          "name": "方向",
+          "description": "rx＝收到，tx＝這台主機送出。"
+        },
+        "limit": {
+          "name": "筆數上限",
+          "description": "最多傳回幾筆。"
+        },
+        "before": {
+          "name": "更早於",
+          "description": "接續上一次呼叫：填它傳回的 next_before。"
+        },
+        "seconds": {
+          "name": "最近幾秒",
+          "description": "只看最近這幾秒的訊框。"
+        }
+      }
+    },
+    "get_activity": {
+      "name": "讀取活動紀錄",
+      "description": "誰送了什麼、改了什麼（新的在前）。要加 return_response: true。",
+      "fields": {
+        "limit": {
+          "name": "筆數上限",
+          "description": "最多傳回幾筆。"
+        }
+      }
+    },
+    "list_periodic": {
+      "name": "列出週期發送",
+      "description": "列出週期發送與執行狀態。要加 return_response: true。"
+    },
+    "list_captures": {
+      "name": "列出擷取檔",
+      "description": "列出錄好的 candump 紀錄檔。要加 return_response: true。"
+    },
     "send": {
       "name": "發送 CAN 訊框",
-      "description": "送出一筆 CAN／CAN FD 訊框，可以等待指定 ID 的回覆。",
+      "description": "送出一筆 CAN／CAN FD 訊框，可以等待指定 ID 的回覆。限管理員；介面不能是只監聽。",
       "fields": {
-        "config_entry_id": { "name": "介面", "description": "要從哪個 CAN 介面送出。" },
-        "can_id": { "name": "CAN ID", "description": "十六進位。1–3 位數＝11-bit，更長＝29-bit。" },
-        "data": { "name": "資料", "description": "十六進位資料：一般 CAN 最多 8 byte，CAN FD 最多 64 byte。" },
-        "extended": { "name": "擴充 ID", "description": "強制使用 29-bit ID（預設依 ID 長度判斷）。" },
-        "fd": { "name": "CAN FD", "description": "以 CAN FD 訊框送出（介面要先開啟 CAN FD）。" },
-        "brs": { "name": "切換速率（BRS）", "description": "CAN FD：資料段用資料段速率傳送。" },
-        "rtr": { "name": "遠端訊框", "description": "送出遠端請求（RTR）訊框。" },
-        "wait_id": { "name": "回覆 ID", "description": "傳回第一筆收到的這個 ID 的訊框（空白＝任何訊框）。" },
-        "wait_ms": { "name": "等待回覆", "description": "0＝不等。" }
+        "config_entry_id": {
+          "name": "介面",
+          "description": "要從哪個 CAN 介面送出。"
+        },
+        "interface": {
+          "name": "介面名稱",
+          "description": "也可以不選介面，改填名稱（CAN0）或介面（can0）。"
+        },
+        "frame": {
+          "name": "訊框",
+          "description": "用 cansend 寫法填整筆訊框：123#11223344、18FF50E5#01、456##1AABB（CAN FD）。可取代 CAN ID 和資料。"
+        },
+        "can_id": {
+          "name": "CAN ID",
+          "description": "十六進位。1–3 位數＝11-bit，更長＝29-bit。"
+        },
+        "data": {
+          "name": "資料",
+          "description": "十六進位資料：一般 CAN 最多 8 byte，CAN FD 最多 64 byte。"
+        },
+        "extended": {
+          "name": "擴充 ID",
+          "description": "強制使用 29-bit ID（預設依 ID 長度判斷）。"
+        },
+        "fd": {
+          "name": "CAN FD",
+          "description": "以 CAN FD 訊框送出（介面要先開啟 CAN FD）。"
+        },
+        "brs": {
+          "name": "切換速率（BRS）",
+          "description": "CAN FD：資料段用資料段速率傳送。"
+        },
+        "rtr": {
+          "name": "遠端訊框",
+          "description": "送出遠端請求（RTR）訊框。"
+        },
+        "wait_id": {
+          "name": "回覆 ID",
+          "description": "傳回第一筆收到的這個 ID 的訊框（沒填等待時間就等 1 秒）。"
+        },
+        "wait_ms": {
+          "name": "等待回覆",
+          "description": "0＝不等；沒填回覆 ID 時，收到任何訊框都算。"
+        },
+        "note": {
+          "name": "備註",
+          "description": "為什麼要送，簡短說明；會顯示在活動紀錄。"
+        }
+      }
+    },
+    "save_periodic": {
+      "name": "儲存週期發送",
+      "description": "新增或修改每隔 period_ms 送一次的訊框。重新啟動後都會先停止。限管理員。",
+      "fields": {
+        "interface": {
+          "name": "介面",
+          "description": "名稱（CAN0）、介面（can0）或設定項目 ID。"
+        },
+        "frame": {
+          "name": "訊框",
+          "description": "cansend 寫法，例如 305#0000000000000000。"
+        },
+        "period_ms": {
+          "name": "週期",
+          "description": "10 ms 以上。"
+        },
+        "count": {
+          "name": "次數",
+          "description": "送幾次後自動停止；0＝直到手動停止。"
+        },
+        "name": {
+          "name": "名稱",
+          "description": "面板上顯示的名稱；預設是訊框本身。"
+        },
+        "item": {
+          "name": "既有項目",
+          "description": "要修改的項目名稱或 ID。"
+        },
+        "start": {
+          "name": "立即開始",
+          "description": "存好後立刻開始送。"
+        },
+        "note": {
+          "name": "備註",
+          "description": "為什麼要做，簡短說明；會顯示在活動紀錄。"
+        }
+      }
+    },
+    "control_periodic": {
+      "name": "開始、停止或刪除週期發送",
+      "description": "限管理員。",
+      "fields": {
+        "item": {
+          "name": "週期發送",
+          "description": "名稱或 ID。"
+        },
+        "action": {
+          "name": "動作",
+          "description": "start（開始）、stop（停止）或 delete（刪除）。"
+        },
+        "note": {
+          "name": "備註",
+          "description": "為什麼要做，簡短說明；會顯示在活動紀錄。"
+        }
+      }
+    },
+    "capture": {
+      "name": "開始或停止擷取",
+      "description": "把介面的訊框錄成 candump 紀錄檔，存在 <config>/woow_can/captures。限管理員。",
+      "fields": {
+        "interface": {
+          "name": "介面",
+          "description": "名稱（CAN0）、介面（can0）或設定項目 ID。"
+        },
+        "action": {
+          "name": "動作",
+          "description": "start（開始）或 stop（停止）。"
+        },
+        "note": {
+          "name": "備註",
+          "description": "為什麼要做，簡短說明；會顯示在活動紀錄。"
+        }
+      }
+    },
+    "clear_monitor": {
+      "name": "清除監看",
+      "description": "把介面的依 ID 統計歸零重來。限管理員。",
+      "fields": {
+        "interface": {
+          "name": "介面",
+          "description": "名稱（CAN0）、介面（can0）或設定項目 ID。"
+        },
+        "note": {
+          "name": "備註",
+          "description": "為什麼要做，簡短說明；會顯示在活動紀錄。"
+        }
       }
     }
   },
   "exceptions": {
-    "not_loaded": { "message": "{entry} 不是已載入的 WOOW CAN 介面。" },
-    "not_available": { "message": "{name} 目前無法使用。" },
-    "send_failed": { "message": "{name}：發送失敗：{error}" },
-    "tx_queue_full": { "message": "{name}：CAN 發送佇列已滿。通常是匯流排上沒有其他節點回 ACK，請檢查接線、終端電阻和速率。" },
-    "bad_frame": { "message": "CAN 訊框格式錯誤：{error}" }
+    "not_loaded": {
+      "message": "{entry} 不是已載入的 WOOW CAN 介面。"
+    },
+    "not_available": {
+      "message": "{name} 目前無法使用。"
+    },
+    "send_failed": {
+      "message": "{name}：發送失敗：{error}"
+    },
+    "tx_queue_full": {
+      "message": "{name}：CAN 發送佇列已滿。通常是匯流排上沒有其他節點回 ACK，請檢查接線、終端電阻和速率。"
+    },
+    "bad_frame": {
+      "message": "CAN 訊框格式錯誤：{error}"
+    },
+    "listen_only": {
+      "message": "{name} 設定為只監聽，不能發送。請先在介面設定關閉只監聽。"
+    },
+    "fd_off": {
+      "message": "{name}：這個介面沒有開啟 CAN FD。"
+    },
+    "bad_input": {
+      "message": "輸入有誤：{error}"
+    },
+    "panel_not_loaded": {
+      "message": "WOOW CAN 的管理面板項目沒有載入；請到「設定 > 裝置與服務 > WOOW CAN」新增。"
+    },
+    "unknown_interface": {
+      "message": "沒有叫 {interface} 的 WOOW CAN 介面。現有介面：{interfaces}。"
+    },
+    "no_interface": {
+      "message": "請指定介面：config_entry_id 或 interface。"
+    },
+    "no_frame": {
+      "message": "請指定訊框：frame（123#1122）或 can_id 加 data。"
+    },
+    "bad_ids": {
+      "message": "ID 清單格式錯誤：{error}"
+    },
+    "unknown_periodic": {
+      "message": "沒有叫 {item} 的週期發送。現有項目：{items}。"
+    },
+    "bad_periodic": {
+      "message": "週期發送設定有誤：{error}"
+    }
   }
 }

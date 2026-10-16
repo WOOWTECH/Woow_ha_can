@@ -1,0 +1,56 @@
+# WOOW CAN (woow_can)
+
+> Home Assistant integration for CAN / CAN FD buses on SocketCAN interfaces (can0 / can1 on a Raspberry Pi
+> with a CAN HAT, or a virtual vcan0). It shows the bus per ID and in time order, estimates bus load, sends
+> frames once or periodically and records candump log files. Everything people do in its panel, an AI agent
+> can do through Home Assistant services; people review the agent's work in the panel's Activity tab.
+
+## Connecting
+
+- ha-mcp: call the services with `ha_call_service` (domain `woow_can`). Always pass `return_response: true`:
+  read services refuse calls without it, and change services only return their result with it.
+- Home Assistant's MCP server (mcp_server, admin): the same services are tools of the LLM API "WOOW CAN".
+- Errors are readable messages: an unknown interface lists the existing ones; bad input names the field.
+- Sending and settings changes (send, save_periodic, control_periodic, capture, clear_monitor) need an admin.
+
+## Workflow
+
+1. `describe` — what the integration does, the frame notation, the workflow, and the interfaces with health.
+2. `list_interfaces` — state (`error_active` = healthy, `error_passive` with TEC >= 128 usually means no other
+   node acknowledges: wiring, termination or bitrate), bus load, frames per second, drops, last error frame.
+3. `get_monitor` {interface, ids} — one row per CAN ID and direction: count, rate_hz, period_ms, latest data,
+   data_changes. `direction` is "tx" only for frames WOOW CAN sent; `from_this_host` marks frames other
+   programs on this host sent. To find which frame an action produces: call get_monitor, ask a person to
+   operate the equipment, call it again and compare data and data_changes.
+4. `get_trace` {interface, ids, direction, seconds, limit, before} — frames in time order, newest first, e.g.
+   a request and its reply. Page back with `before` = the previous call's `next_before`.
+5. `send` {interface, frame, wait_id, wait_ms, note} — one frame; with wait_id the first frame with that ID is
+   returned as `reply`. Interfaces in listen-only mode refuse to send. On a vehicle, machine or battery bus
+   only send a frame the user asked for.
+6. `save_periodic` {interface, frame, period_ms, count, name, start, note} / `control_periodic`
+   {item, action: start|stop|delete} — frames sent every period_ms (>= 10 ms). All stop when Home Assistant
+   restarts.
+7. `capture` {interface, action: start|stop} and `list_captures` — candump log files under
+   `<config>/woow_can/captures`.
+8. `get_activity` — what changed, by whom, why. Give every send and change a short `note`.
+
+Interfaces can be named by config entry id, name (`CAN0`) or interface (`can0`).
+
+## Notation
+
+- Frames (cansend): `123#11223344` (11-bit ID: 1-3 hex digits), `18FF50E5#0102` (29-bit: more digits),
+  `123#R` (remote frame), `456##1AABBCC` (CAN FD; the digit after `##` holds the flags, 1 = bit rate switch).
+- ID lists (`ids`, the event filter): `123, 18FF50E5, 7E0/7F0, 100-1FF` — exact IDs, ID/mask, ranges; `*` = all.
+- Data in results is hex with spaces (`"14 02 74 0E"`), byte 0 first.
+
+## Events
+
+`woow_can_frame` fires for received frames whose ID is in the interface's "IDs that fire events" option
+(empty by default): entry_id, name, interface, frame, id, id_hex, data, length, extended, fd, brs, rtr.
+
+## Safety
+
+- Listen-only interfaces never acknowledge or send.
+- Never send frames that control engines, drives or batteries (J1939 TSC1, CANopen NMT reset, enabling a
+  drive) or clear fault codes (OBD-II mode 04, J1939 DM11) unless the user asked for exactly that.
+- Every send made through the services is in the activity log with the user and the note.

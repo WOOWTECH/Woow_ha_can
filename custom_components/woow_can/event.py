@@ -1,4 +1,4 @@
-"""Event entity: fires once per received frame (use it as an automation trigger)."""
+"""Event entity: fires for received frames whose ID is in the interface's event filter."""
 
 from __future__ import annotations
 
@@ -18,13 +18,14 @@ class Received(WoowCanEntity, EventEntity):
 
     _attr_event_types = ["frame"]
     _attr_icon = "mdi:message-arrow-left-outline"
-    _updates_on = ("rx",)
+    _updates_on = ("event",)
+    _unrecorded_attributes = frozenset({"frame", "id", "id_hex", "data", "length", "extended", "fd", "brs", "rtr"})
 
     def __init__(self, hub) -> None:
         super().__init__(hub, "rx_frame", "event")
 
     @callback
     def _refresh(self, what: str = "") -> None:
-        if what != "rx" or not self.hub.last_rx:
+        if what != "event" or not self.hub.last_event:
             return
-        self._trigger_event("frame", self.hub.last_rx[0].as_dict())
+        self._trigger_event("frame", self.hub.last_event)
