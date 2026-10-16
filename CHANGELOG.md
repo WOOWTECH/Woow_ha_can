@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 — 2026-10-16
+
+- WOOWTECH brand images (`brand/`): Home Assistant 2026.x shows a custom integration's own icon and logo.
+
 ## 0.1.0 — 2026-10-16
 
 First public release (split out of the former woow_bus integration).
