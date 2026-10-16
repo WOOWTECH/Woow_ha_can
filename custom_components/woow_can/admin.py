@@ -7,6 +7,7 @@ same monitor and trace views as a live interface.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 import logging
 import os
@@ -19,11 +20,13 @@ from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util, slugify
 
+from . import analysis
 from .activity import ActivityLog
-from .can_port import F_ERR, CanFrame
-from .capture import Recording, TraceBuffer, read_log, safe_name
+from .can_port import CAN_RTR_FLAG, F_ERR, F_OWN, CanFrame, id_hex
+from .capture import Recording, TraceBuffer, TraceFrame, TraceSnapshot, safe_name, trace_matcher
 from .databases import DatabaseLibrary
 from .devices import DeviceManager
+from . import formats
 from .monitor import TX_KEY
 from .signals import DefinitionError, j1939_pgn
 from .templates import TemplateLibrary
@@ -61,9 +64,10 @@ class OfflineSource:
     live = False
 
     def __init__(self, source_id: str, file: str, ifname: str, frames: list[tuple[float, int, bytes, int]],
-                 truncated: bool) -> None:
+                 truncated: bool, fmt: str = "log") -> None:
         self.id = source_id
         self.file = file
+        self.format = fmt
         self.port = ifname
         self.name = f"{file} · {ifname}"
         self.monitor = Monitor()
@@ -78,6 +82,7 @@ class OfflineSource:
 
     def info(self) -> dict[str, Any]:
         return {"id": self.id, "name": self.name, "file": self.file, "port": self.port, "offline": True,
+                "format": self.format,
                 "frames": self.trace.seq, "truncated": self.truncated, "start": self.start, "end": self.end,
                 "monitor": {"ids": len(self.monitor.stats), "frames": self.monitor.frames, "overflow": self.monitor.overflow},
                 "trace": {"first": self.trace.first, "end": self.trace.seq, "capacity": self.trace.capacity}}
@@ -107,6 +112,9 @@ class AdminHub:
         self._status_unsubs: dict[str, CALLBACK_TYPE] = {}
         self._flush_handle: Any = None
         self._unsubs: list[CALLBACK_TYPE] = []
+        self.searches: dict[str, analysis.Search] = {}  # source id -> the value search of the panel / agents
+        self.guided: dict[str, list[analysis.Phase]] = {}  # source id -> guided capture phases
+        self._analysis_lock = asyncio.Lock()
 
     @property
     def hubs(self) -> dict[str, CanHub]:
@@ -489,7 +497,7 @@ class AdminHub:
 
     async def async_save_upload(self, name: str, data: bytes) -> str:
         name = safe_name(name)
-        if not name.endswith((".log", ".txt")):
+        if not name.lower().endswith(formats.EXTENSIONS):
             name += ".log"
         path = self._capture_path(name)
 
@@ -504,23 +512,228 @@ class AdminHub:
 
     async def async_open_capture(self, name: str) -> list[OfflineSource]:
         path = self._capture_path(name)
-        by_iface, _lines, skipped = await self.hass.async_add_executor_job(read_log, path, TRACE_CAPACITY + 1)
+        by_iface, skipped, fmt = await self.hass.async_add_executor_job(formats.read_file, path, TRACE_CAPACITY + 1)
         opened = []
         for ifname, frames in by_iface.items():
             truncated = len(frames) > TRACE_CAPACITY
             frames = frames[-TRACE_CAPACITY:]
             source_id = f"file:{name}:{ifname}"
-            src = await self.hass.async_add_executor_job(OfflineSource, source_id, name, ifname, frames, truncated)
+            src = await self.hass.async_add_executor_job(OfflineSource, source_id, name, ifname, frames, truncated,
+                                                          fmt)
             self.offline[source_id] = src
             opened.append(src)
         if not opened:
-            raise HomeAssistantError(f"{name}: no CAN frames found ({skipped} lines not understood); "
-                                     "use candump's log format, e.g. (1760600000.123456) can0 123#DEADBEEF")
+            raise HomeAssistantError(f"{name}: no CAN frames found ({skipped} lines not understood); readable: "
+                                     f"{', '.join(formats.READ_FORMATS.values())}")
         self._send("offline", {"offline": [s.info() for s in self.offline.values()]})
         return opened
+
+    async def async_convert_capture(self, name: str, fmt: str) -> dict[str, Any]:
+        """Write a capture (any readable format) as `fmt` next to it: <name>.<ext>, -2, -3 ... if taken."""
+        if fmt not in formats.WRITE_FORMATS:
+            raise HomeAssistantError(f"unknown format {fmt!r}: use one of {', '.join(formats.WRITE_FORMATS)}")
+        src = self._capture_path(name)
+        if any(hub.recording is not None and hub.recording.path == src for hub in self.hubs.values()):
+            raise HomeAssistantError("stop the recording first")
+        stem = os.path.splitext(os.path.basename(src))[0]
+
+        def run() -> dict[str, Any]:
+            if not os.path.isfile(src):
+                raise HomeAssistantError(f"no capture named {name!r}")
+            target, n = f"{stem}.{fmt}", 1
+            while os.path.exists(self._capture_path(target)):
+                n += 1
+                target = f"{stem}-{n}.{fmt}"
+            dst = self._capture_path(target)
+            try:
+                result = formats.convert_file(src, dst, fmt)
+            except ValueError as err:
+                if os.path.exists(dst):
+                    os.remove(dst)
+                raise HomeAssistantError(f"{name}: {err}") from err
+            return {"name": target, "size": os.path.getsize(dst), **result}
+
+        result = await self.hass.async_add_executor_job(run)
+        self._send("captures", {"changed": True})
+        return result
 
     @callback
     def close_offline(self, source_id: str) -> None:
         self.offline.pop(source_id, None)
+        self.searches.pop(source_id, None)
         self._viewers = [(src, v) for src, v in self._viewers if getattr(src, "id", None) != source_id]
         self._send("offline", {"offline": [s.info() for s in self.offline.values()]})
+
+    # ---- reverse engineering -----------------------------------------------------------
+    @staticmethod
+    def key_text(key: int) -> str:
+        """A monitor key as people read it: 18FF50E5, or 123 (tx) for frames WOOW CAN sent."""
+        return id_hex(key & 0xFFFFFFFF) + (" (tx)" if key & TX_KEY else "")
+
+    @staticmethod
+    def _now(src: Any) -> float:
+        """'Now' of a source: the clock for interfaces, the last frame for files."""
+        return time.time() if getattr(src, "live", True) else (src.end or 0.0)
+
+    def _frames_of(self, src: Any, snapshot: TraceSnapshot, key: int, seconds: float | None,
+                   limit: int) -> list[TraceFrame]:
+        """Blocking: the newest frames of one monitor key, oldest first."""
+        raw = key & 0xFFFFFFFF
+        match = trace_matcher(lambda r: r == raw, "tx" if key & TX_KEY else "rx", errors=False)
+        since = self._now(src) - seconds if seconds else None
+        return list(reversed(snapshot.page(None, limit, match, since)["frames"]))
+
+    async def async_bits(self, source_id: str, key: int, seconds: float | None = None,
+                         limit: int = 2000) -> dict[str, Any]:
+        src = self.source(source_id)
+        snapshot = src.trace.snapshot()
+
+        def run() -> dict[str, Any]:
+            frames = self._frames_of(src, snapshot, key, seconds, limit)
+            out = analysis.bit_activity([f.data for f in frames])
+            out.update({"id": self.key_text(key), "key": key, "from": frames[0].t if frames else None,
+                        "to": frames[-1].t if frames else None})
+            return out
+
+        return await self.hass.async_add_executor_job(run)
+
+    async def async_try_signal(self, source_id: str, key: int, sig: Any, seconds: float | None = 60.0,
+                               limit: int = 2000, samples: int = 300) -> dict[str, Any]:
+        """A candidate field decoded over the recent frames of one ID."""
+        src = self.source(source_id)
+        snapshot = src.trace.snapshot()
+
+        def run() -> dict[str, Any]:
+            frames = self._frames_of(src, snapshot, key, seconds, limit)
+            return {"id": self.key_text(key), **analysis.series([(f.t, f.data) for f in frames], sig, samples)}
+
+        return await self.hass.async_add_executor_job(run)
+
+    def _latest(self, src: Any) -> dict[int, bytes]:
+        return {key: st.data for key, st in src.monitor.stats.items() if st.data and not st.raw & CAN_RTR_FLAG}
+
+    async def async_find(self, source_id: str, action: str, mode: str | None = None, value: float | None = None,
+                         tolerance: float | None = None, limit: int = 20) -> dict[str, Any]:
+        """Find the field holding a value: start (with the value, or without for a relative search), then narrow
+        (equals a new value, increased, decreased, changed, unchanged) as the equipment changes."""
+        src = self.source(source_id)
+        async with self._analysis_lock:
+            search = self.searches.get(source_id)
+            if action == "start":
+                search = self.searches[source_id] = analysis.Search()
+                await self.hass.async_add_executor_job(search.start, self._latest(src), value, tolerance)
+            elif action == "narrow":
+                if search is None:
+                    raise HomeAssistantError("no search on this interface: start one first")
+                try:
+                    await self.hass.async_add_executor_job(search.narrow, self._latest(src), mode or "equals", value,
+                                                           tolerance)
+                except ValueError as err:
+                    raise HomeAssistantError(str(err)) from err
+            elif action == "clear":
+                self.searches.pop(source_id, None)
+                search = None
+            elif action != "status":
+                raise HomeAssistantError(f"unknown action {action!r}")
+            if search is None:
+                return {"left": 0, "ids": 0, "truncated": False, "steps": [], "candidates": []}
+            return search.summary(limit, self.key_text)
+
+    async def async_guided(self, source_id: str, action: str, label: str | None = None,
+                           limit: int = 20) -> dict[str, Any]:
+        """Guided capture: start (idle), next (do the action), next (undo it), ... finish -> what differs.
+        Phases alternate idle / action; repeating the action rules out changes that only coincided."""
+        src = self.source(source_id)
+        if not getattr(src, "live", True):
+            raise HomeAssistantError("a guided capture needs a live interface")
+        now = time.time()
+        phases = self.guided.get(source_id)
+        result: dict[str, Any] = {}
+        if action == "start":
+            phases = self.guided[source_id] = [analysis.Phase(label or "idle", now)]
+        elif action in ("next", "finish"):
+            if not phases or phases[-1].end is not None:
+                raise HomeAssistantError("no guided capture running on this interface: start one first")
+            if action == "next":
+                if len(phases) >= analysis.MAX_PHASES:
+                    raise HomeAssistantError(f"{analysis.MAX_PHASES} phases at most: finish now")
+                phases[-1].end = now
+                phases.append(analysis.Phase(label or ("action" if len(phases) % 2 else "idle"), now))
+            else:
+                if len(phases) < 2:
+                    raise HomeAssistantError("finish needs two phases: start (idle), next (action), then finish")
+                phases[-1].end = now
+                result = await self._async_compare(src, phases, limit)
+        elif action == "cancel":
+            self.guided.pop(source_id, None)
+            phases = None
+        elif action != "status":
+            raise HomeAssistantError(f"unknown action {action!r}")
+        status = [{"label": p.label, "start": round(p.start, 3), "end": None if p.end is None else round(p.end, 3),
+                   "seconds": round((p.end or now) - p.start, 1)} for p in phases or []]
+        running = bool(phases) and phases[-1].end is None
+        return {"phases": status, "running": running, **result}
+
+    async def _async_compare(self, src: Any, phases: list[analysis.Phase], limit: int) -> dict[str, Any]:
+        snapshot = src.trace.snapshot()
+
+        def run() -> dict[str, Any]:
+            buckets: list[dict[int, list[bytes]]] = [{} for _ in phases]
+            seq = snapshot.seq_at(phases[0].start)
+            lost = seq == snapshot.first and snapshot.first > 0
+            ends = [p.end or time.time() for p in phases]
+            for frame in snapshot.frames(seq):
+                if frame.flags & F_ERR or frame.raw & CAN_RTR_FLAG:
+                    continue
+                index = next((i for i, p in enumerate(phases) if p.start <= frame.t < ends[i]), None)
+                if index is None:
+                    if frame.t >= ends[-1]:
+                        break
+                    continue
+                key = frame.raw | (TX_KEY if frame.flags & F_OWN else 0)
+                buckets[index].setdefault(key, []).append(frame.data)
+            out: dict[str, Any] = {"results": analysis.compare(buckets, self.key_text, limit),
+                                   "frames": [sum(len(v) for v in b.values()) for b in buckets]}
+            if lost:
+                out["warning"] = "the start of the first phase is no longer in the buffer: keep the phases shorter"
+            return out
+
+        return await self.hass.async_add_executor_job(run)
+
+    async def async_add_signal(self, entry_id: str, key: int, signal: dict[str, Any], device_ref: str | None = None,
+                               device_name: str | None = None, message: str | None = None, adopt: bool = True):
+        """Put a field found by the tools above into a device (a new one unless device_ref names one)."""
+        hub = self.hubs.get(entry_id)
+        if hub is None:
+            raise HomeAssistantError("the interface is not loaded")
+        raw_id = key & 0xFFFFFFFF
+        extended = bool(raw_id & 0x80000000)
+        can_id = raw_id & 0x1FFFFFFF
+        id_text = f"{can_id:08X}" if extended else f"{can_id:03X}"
+        if device_ref:
+            device = self.devices.resolve(device_ref)
+            if device is None:
+                raise DefinitionError("unknown_device", device=device_ref)
+            if device.interface != entry_id:
+                raise DefinitionError("other_interface", device=device.name)
+            definition = device.as_dict()
+        else:
+            definition = {"name": device_name or f"{hub.name} {id_text}", "interface": entry_id, "messages": [],
+                          "source": "custom"}
+        msg = next((m for m in definition["messages"] if m.get("can_id") is not None and not m.get("id_mask")
+                    and not m.get("filters") and int(str(m["can_id"]), 16) == can_id
+                    and bool(m.get("extended")) == extended), None)
+        if msg is None:
+            stat = hub.monitor.stats.get(key)
+            msg = {"name": message or f"ID_{id_text}", "can_id": id_text, "extended": extended,
+                   "length": len(stat.data) if stat and stat.data else 8, "signals": []}
+            if stat and stat.period:
+                msg["cycle_ms"] = max(1, round(stat.period * 1000))
+            definition["messages"].append(msg)
+        if any(s["name"] == signal["name"] for s in msg["signals"]):
+            raise DefinitionError("duplicate_signal", message=msg["name"])
+        entry = {k: v for k, v in signal.items() if v not in (None, "")}
+        if adopt:
+            entry["entity"] = {"enabled": True}
+        msg["signals"].append(entry)
+        return await self.devices.async_save(definition), msg["name"]

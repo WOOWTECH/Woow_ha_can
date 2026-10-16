@@ -8,14 +8,16 @@ For RS485 / RS232 use [WOOW Serial](https://github.com/WOOWTECH/Woow_ha_serial).
 
 ## Admin panel
 
-"WOOW CAN" in the sidebar (admins), with five tabs:
+"WOOW CAN" in the sidebar (admins), with seven tabs:
 
 | Tab | What it shows |
 |---|---|
 | Overview | A health card per interface: state (normal / error warning / error passive / bus off), TEC / REC, bus load (now, peak, 1 / 5 / 15 min, with a sparkline of the last minutes), frame rates, controller events, drops, the last error frame in plain words, and hints such as "nothing acknowledges" |
 | Monitor | One row per ID, like cansniffer or SavvyCAN: a changed byte lights up and fades, cyan rising, red falling, grey-violet for bytes that keep jumping (counters, checksums); Notch masks the bits that always change, so only what you operate lights up; filter, pin, binary view. Paused, it shows the frames in time order and pages back through them. On a phone each ID is a card |
+| Analyze | Find unknown signals: a guided capture (which bits an action changes), finding a signal by its value, a bit heat map of one ID; a found field becomes an entity in one step (see "Finding unknown signals") |
+| Devices | Templates, DBC files, live values, entity settings and charts (see "Devices, templates and DBC files") |
 | Send | One frame in cansend notation (optionally waiting for a reply ID); a list of periodic sends (period, count, start / stop). The first send on an interface asks for confirmation |
-| Recordings | Record an interface to a candump log, download the buffer (the last 200,000 frames), upload a log and open it in the same monitor views |
+| Recordings | Record an interface to a candump log; download the buffer (the last 200,000 frames) as candump, Vector ASC, SavvyCAN CSV or pcap (Wireshark); upload a log (candump, ASC, CSV, PEAK TRC, OVMS CRTD, pcap) and open it in the same monitor views; convert recordings to the other formats |
 | Activity | Sends and changes by AI agents (services) and people (panel), with the user and the note |
 
 The panel gets a batch every 250 ms and must acknowledge each one before the next is sent, so on a busy bus a phone just updates less often instead of being disconnected by Home Assistant.
@@ -38,6 +40,16 @@ The Devices tab decodes frames into values; chosen signals become Home Assistant
 - **Each entity is throttled on its own**: numbers at most once a second, changes under half a resolution step are not written; silent for longer than max(3 cycles, 5 s) the entity turns unavailable. Tune it in the panel or with `set_signal`.
 - Every numeric signal can be charted live.
 - Decoding needs no external package; it is tested against the verified real and example frames from the research, and compared with cantools in CI.
+
+## Finding unknown signals
+
+For equipment without a DBC file or a template, the Analyze tab finds where the signals are (on the source picked on the Monitor tab):
+
+- **Guided capture**: press Start and leave the equipment idle, press Next and do the action (open the door, press the button, switch the light on) and hold it, press Next and undo it; repeat two or three times, then Finish. The IDs are ranked by what differs: bits that follow the action every time (switches, lamps), bytes that change level, IDs only sent during the action. Rolling counters are recognised and left out, and pressing Next a moment before or after acting does not matter.
+- **Find a signal by its value**: start with a value read off the equipment's display (say 52.3 V), let it change, enter the new value and narrow; repeat until one or two fields are left. It tries bytes, words, nibbles and bits in both byte orders, signed and unsigned, with the usual scalings and offsets (0.1, 0.01, −40, −273 ...). Without a known value, narrow by "increased / decreased / changed / unchanged".
+- **Bits of one ID**: a heat map of how often each bit changes; tap two bits to set a field and see its decoded values at once.
+- **Add to a device** turns a found field into an entity (1-bit fields are binary sensors, others sensors), in an existing device or a new one.
+- Every ID's details on the Monitor tab link here ("Bits & analysis").
 
 ## Interface settings
 
@@ -68,12 +80,13 @@ The Devices tab decodes frames into values; chosen signals become Home Assistant
 | `get_activity`, `list_periodic`, `list_captures` | Activity log, periodic sends, recordings |
 | `send` | Send a frame, optionally waiting for a reply (`wait_id`, `wait_ms`); `frame: 7DF#02010C` or `can_id` with `data` |
 | `save_periodic`, `control_periodic` | Add or change a periodic send; start, stop, delete |
-| `capture` | Start or stop a recording |
+| `capture`, `convert_capture` | Start or stop a recording; write a recording as ASC, CSV or pcap |
 | `clear_monitor` | Start an interface's monitor statistics over |
 | `list_templates`, `create_from_template` | Templates; make a device from one (groups detected from traffic unless given) |
 | `list_devices`, `get_device`, `save_device`, `delete_device` | Devices with current values and full definitions; create or change one from JSON; delete |
 | `set_signal` | Make a signal an entity or drop it; minimum interval, tolerance, timeout |
 | `decode_frame`, `test_signal` | Decode one frame with the interface's definitions; try a bit field on recent frames (where is the value?) |
+| `guided_capture`, `find_signal`, `bit_activity`, `add_signal` | Find unknown signals: guided capture, find by value, bit activity; put a found field into a device |
 | `import_dbc`, `list_databases`, `attach_dbc`, `create_from_dbc` | Import a DBC file, attach it, make a device from it |
 
 - Interfaces can be named by config entry id, name (CAN0) or interface (can0).
@@ -166,8 +179,10 @@ cd frontend && npm install && npm run build   # the panel (Lit), built into cust
 ```
 
 - `tools/check_can.py`: hardware check, including the controller's internal loopback.
-- `tools/sim/can_sim.py`: a Pylontech battery, an inverter, a J1939 engine and an OBD-II ECU on a virtual interface.
+- `tools/sim/can_sim.py`: a Pylontech battery, an inverter, a J1939 engine, NMEA 2000, a CANopen node, an OBD-II ECU and a body controller operated with `6F0#01` (door) and `6F0#02` (light), on a virtual interface.
 - `tools/can_live_check.py`: end-to-end check against a running Home Assistant, from the SSH add-on (services, panel websocket, periodic sends, events, recordings).
+- `tools/template_check.py`: every template against the simulator, live.
+- `tools/analysis_check.py`: the file formats and analysis tools end to end (conversions, an uploaded ASC, finding the battery voltage, the door bit by guided capture, adding to a device).
 
 ## License
 

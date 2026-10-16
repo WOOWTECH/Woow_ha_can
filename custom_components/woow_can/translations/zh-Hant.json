@@ -215,7 +215,25 @@
     },
     "list_captures": {
       "name": "列出擷取檔",
-      "description": "列出錄好的 candump 紀錄檔。要加 return_response: true。"
+      "description": "列出錄好或上傳的紀錄檔（candump log、Vector ASC、SavvyCAN CSV、PEAK TRC、OVMS CRTD、pcap），以及可以轉成哪些格式。要加 return_response: true。"
+    },
+    "convert_capture": {
+      "name": "轉換擷取檔",
+      "description": "把紀錄檔轉成另一種格式，存在同一個資料夾：candump log、Vector ASC（CANalyzer、CANoe、python-can）、SavvyCAN GVRET CSV 或 pcap（Wireshark）。限管理員。",
+      "fields": {
+        "file": {
+          "name": "檔案",
+          "description": "列出擷取檔裡的檔名，例如 CAN0_20261016-120000.log。"
+        },
+        "format": {
+          "name": "格式",
+          "description": "log、asc、csv（只含傳統訊框）或 pcap。"
+        },
+        "note": {
+          "name": "備註",
+          "description": "為什麼要做，簡短說明；會顯示在活動紀錄。"
+        }
+      }
     },
     "send": {
       "name": "發送 CAN 訊框",
@@ -517,6 +535,10 @@
           "name": "CAN ID",
           "description": "十六進位。1–3 位數＝11-bit，更長＝29-bit。"
         },
+        "direction": {
+          "name": "方向",
+          "description": "rx（收到的，預設）或 tx（WOOW CAN 送出的）。"
+        },
         "start": {
           "name": "起始位元",
           "description": "DBC 編號：Intel 填最低位元，Motorola 填最高位元。"
@@ -548,6 +570,154 @@
         "limit": {
           "name": "筆數上限",
           "description": "最多讀幾筆。"
+        }
+      }
+    },
+    "bit_activity": {
+      "name": "位元活動",
+      "description": "看某個 ID 最近的訊框裡，哪些位元在變、變得多頻繁：每筆都變的通常是計數器或檢查碼，從不變的是沒用到或固定值。要加 return_response: true。",
+      "fields": {
+        "interface": {
+          "name": "介面",
+          "description": "名稱（CAN0）、介面（can0）或設定項目 ID。"
+        },
+        "can_id": {
+          "name": "CAN ID",
+          "description": "十六進位：1-3 位是 11-bit ID，更多位是 29-bit ID。"
+        },
+        "direction": {
+          "name": "方向",
+          "description": "rx（收到的，預設）或 tx（WOOW CAN 送出的）。"
+        },
+        "seconds": {
+          "name": "最近幾秒",
+          "description": "往回看多久。"
+        },
+        "limit": {
+          "name": "筆數",
+          "description": "最多看最新的這麼多筆。"
+        }
+      }
+    },
+    "find_signal": {
+      "name": "依數值找訊號",
+      "description": "找出存放某個數值的欄位（人從螢幕或儀表讀到的數字），像記憶體搜尋器：用現在顯示的數值開始（或不給數值，之後說它怎麼變），讓數值改變，再用新數值篩選，重複到只剩一兩個欄位。會試位元組、字組、半位元組和位元，兩種位元組順序、有號無號，加上常見比例（0.1、0.01、0.5…，偏移 -40、-273…）。開始時的數值不要用 0。要加 return_response: true。",
+      "fields": {
+        "interface": {
+          "name": "介面",
+          "description": "名稱（CAN0）、介面（can0）或設定項目 ID。"
+        },
+        "action": {
+          "name": "動作",
+          "description": "start（新搜尋，可帶數值或不帶）、narrow（只留符合條件的）、clear（清除）、status（目前狀態）。"
+        },
+        "mode": {
+          "name": "條件",
+          "description": "narrow 用：equals（等於 value）、increased（變大）、decreased（變小）、changed（有變）、unchanged（沒變），跟上一步比。"
+        },
+        "value": {
+          "name": "數值",
+          "description": "現在顯示的數值，用它的單位（52.3 V 就填 52.3）。"
+        },
+        "tolerance": {
+          "name": "容許誤差",
+          "description": "讀值可以差多少；預設是數值的 1%，至少 0.05。"
+        },
+        "limit": {
+          "name": "顯示幾個",
+          "description": "回傳最可能的幾個欄位。"
+        }
+      }
+    },
+    "guided_capture": {
+      "name": "引導式擷取",
+      "description": "找出某個動作在匯流排上改變了什麼。start：請人先讓設備保持不動；next：請人做那個動作（開門、按按鈕、開燈）並維持；可以再 next：請人還原；finish：依差異排出 ID：兩段都穩定但值不同的位元（開關）、只在動作時變動的位元、數值整段改變的位元組、只在動作時才出現的 ID。每段給幾秒鐘。要加 return_response: true。",
+      "fields": {
+        "interface": {
+          "name": "介面",
+          "description": "名稱（CAN0）、介面（can0）或設定項目 ID。"
+        },
+        "action": {
+          "name": "動作",
+          "description": "start、next、finish、cancel 或 status。"
+        },
+        "label": {
+          "name": "標籤",
+          "description": "現在開始的這一段在做什麼，例如「開門」。"
+        },
+        "limit": {
+          "name": "顯示幾個 ID",
+          "description": "回傳變化最多的幾個 ID。"
+        }
+      }
+    },
+    "add_signal": {
+      "name": "加入訊號",
+      "description": "把用依數值找訊號、引導式擷取或試解欄位找到的欄位加進裝置：既有的（device）或新的（device_name）；裝置還沒有這個 ID 的訊息就自動建立。1 位元的欄位會變成二元感測器，其他是感測器。限管理員。",
+      "fields": {
+        "interface": {
+          "name": "介面",
+          "description": "名稱（CAN0）、介面（can0）或設定項目 ID。"
+        },
+        "can_id": {
+          "name": "CAN ID",
+          "description": "十六進位：1-3 位是 11-bit ID，更多位是 29-bit ID。"
+        },
+        "direction": {
+          "name": "方向",
+          "description": "rx（收到的，預設）或 tx（WOOW CAN 送出的）。"
+        },
+        "name": {
+          "name": "名稱",
+          "description": "訊號名稱，也是實體名稱。"
+        },
+        "start": {
+          "name": "起始位元",
+          "description": "位元位置：第 i 位是第 i / 8 個位元組的第 i % 8 位；big-endian 欄位從最高位開始。"
+        },
+        "length": {
+          "name": "長度",
+          "description": "位元數。"
+        },
+        "byte_order": {
+          "name": "位元組順序",
+          "description": "little（Intel）或 big（Motorola）。"
+        },
+        "signed": {
+          "name": "有號",
+          "description": "二補數。"
+        },
+        "factor": {
+          "name": "比例",
+          "description": "實際值 = 原始值 × 比例 + 偏移。"
+        },
+        "offset": {
+          "name": "偏移",
+          "description": "實際值 = 原始值 × 比例 + 偏移。"
+        },
+        "unit": {
+          "name": "單位",
+          "description": "V、A、°C、%、km/h…（認得的單位會設好裝置類別）。"
+        },
+        "device": {
+          "name": "裝置",
+          "description": "這個介面上既有的裝置（名稱或 ID）；留空就建新裝置。"
+        },
+        "device_name": {
+          "name": "新裝置名稱",
+          "description": "建新裝置時用；預設是介面加 ID。"
+        },
+        "message": {
+          "name": "訊息名稱",
+          "description": "建新訊息時用；預設是 ID_ 加上 ID，例如 ID_351。"
+        },
+        "adopt": {
+          "name": "建立實體",
+          "description": "現在就建立實體（預設），或只把訊號加進定義。"
+        },
+        "note": {
+          "name": "備註",
+          "description": "為什麼要做，簡短說明；會顯示在活動紀錄。"
         }
       }
     },

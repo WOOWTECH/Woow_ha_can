@@ -10,12 +10,13 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
+from . import analysis
 from .admin import AdminHub
 from .can_port import CanFrame, IdMatcher, parse_id
 from .capture import trace_matcher
 from .const import CONF_EVENT_FILTER, CONF_MAX_RATE, DOMAIN, TRACE_PAGE
 from .periodic import PeriodicError
-from .signals import DefinitionError
+from .signals import DefinitionError, Signal
 
 _COMMANDS: list[Any] = []
 
@@ -319,10 +320,11 @@ async def ws_capture_list(hass: HomeAssistant, connection: websocket_api.ActiveC
 @websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "woow_can/capture/control",
-    vol.Required("action"): vol.In(["start", "stop", "delete", "open", "close"]),
+    vol.Required("action"): vol.In(["start", "stop", "delete", "open", "close", "convert"]),
     vol.Optional("entry_id"): str,
     vol.Optional("name"): str,
     vol.Optional("source"): str,
+    vol.Optional("format"): str,
 })
 @websocket_api.async_response
 async def ws_capture_control(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
@@ -353,6 +355,10 @@ async def ws_capture_control(hass: HomeAssistant, connection: websocket_api.Acti
         elif action == "open":
             opened = await admin.async_open_capture(msg.get("name") or "")
             result["sources"] = [s.info() for s in opened]
+        elif action == "convert":
+            result = await admin.async_convert_capture(msg.get("name") or "", msg.get("format") or "")
+            await _log(admin, connection, "convert_capture", "capture_converted",
+                       {"file": msg.get("name"), "target": result["name"], "frames": result["frames"]})
         else:
             admin.close_offline(msg.get("source") or "")
     except (HomeAssistantError, ValueError, OSError) as err:
@@ -514,3 +520,150 @@ async def ws_dbc_control(hass: HomeAssistant, connection: websocket_api.ActiveCo
         return
     admin.databases_changed()
     connection.send_result(msg["id"], result)
+
+
+# ---- reverse engineering -----------------------------------------------------------------------
+_SIGNAL_SPEC = vol.Schema({
+    vol.Required("start"): vol.All(int, vol.Range(min=0, max=511)),
+    vol.Required("length"): vol.All(int, vol.Range(min=1, max=64)),
+    vol.Optional("byte_order", default="little"): vol.In(["little", "big"]),
+    vol.Optional("signed", default=False): bool,
+    vol.Optional("factor", default=1.0): vol.Coerce(float),
+    vol.Optional("offset", default=0.0): vol.Coerce(float),
+    vol.Optional("name", default="candidate"): str,
+    vol.Optional("unit", default=""): str,
+}, extra=vol.REMOVE_EXTRA)
+
+
+def _signal(spec: dict[str, Any]) -> Signal:
+    return Signal(name=spec["name"], start=spec["start"], length=spec["length"], byte_order=spec["byte_order"],
+                  signed=spec["signed"], factor=spec["factor"], offset=spec["offset"], unit=spec["unit"])
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/analyze/bits",
+    vol.Required("source"): str,
+    vol.Required("key"): int,
+    vol.Optional("seconds"): vol.Any(None, vol.Coerce(float)),
+    vol.Optional("limit", default=2000): vol.All(int, vol.Range(min=2, max=20000)),
+})
+@websocket_api.async_response
+async def ws_analyze_bits(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Per bit of one ID: changes and ones over its recent frames (the heat map)."""
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        result = await admin.async_bits(msg["source"], msg["key"], msg.get("seconds"), msg["limit"])
+    except HomeAssistantError as err:
+        connection.send_error(msg["id"], "failed", str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/analyze/try",
+    vol.Required("source"): str,
+    vol.Required("key"): int,
+    vol.Required("signal"): dict,
+    vol.Optional("seconds"): vol.Any(None, vol.Coerce(float)),
+    vol.Optional("limit", default=2000): vol.All(int, vol.Range(min=1, max=20000)),
+})
+@websocket_api.async_response
+async def ws_analyze_try(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """A candidate field decoded over the recent frames of one ID."""
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        sig = _signal(_SIGNAL_SPEC(msg["signal"]))
+        result = await admin.async_try_signal(msg["source"], msg["key"], sig, msg.get("seconds"), msg["limit"])
+    except (vol.Invalid, DefinitionError, HomeAssistantError) as err:
+        connection.send_error(msg["id"], "failed", str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/analyze/find",
+    vol.Required("source"): str,
+    vol.Required("action"): vol.In(["start", "narrow", "clear", "status"]),
+    vol.Optional("mode"): vol.In(list(analysis.MODES)),
+    vol.Optional("value"): vol.Any(None, vol.Coerce(float)),
+    vol.Optional("tolerance"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0))),
+    vol.Optional("limit", default=30): vol.All(int, vol.Range(min=1, max=500)),
+})
+@websocket_api.async_response
+async def ws_analyze_find(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Find the field holding a value, step by step."""
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        result = await admin.async_find(msg["source"], msg["action"], msg.get("mode"), msg.get("value"),
+                                        msg.get("tolerance"), msg["limit"])
+    except HomeAssistantError as err:
+        connection.send_error(msg["id"], "failed", str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/analyze/guided",
+    vol.Required("source"): str,
+    vol.Required("action"): vol.In(["start", "next", "finish", "cancel", "status"]),
+    vol.Optional("label"): vol.Any(None, str),
+    vol.Optional("limit", default=20): vol.All(int, vol.Range(min=1, max=200)),
+})
+@websocket_api.async_response
+async def ws_analyze_guided(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Guided capture: idle, action, (idle again), then what differs."""
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        result = await admin.async_guided(msg["source"], msg["action"], msg.get("label"), msg["limit"])
+    except HomeAssistantError as err:
+        connection.send_error(msg["id"], "failed", str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/devices/add_signal",
+    vol.Required("entry_id"): str,
+    vol.Required("key"): int,
+    vol.Required("signal"): dict,
+    vol.Optional("device_id"): vol.Any(None, str),
+    vol.Optional("device_name"): vol.Any(None, str),
+    vol.Optional("message"): vol.Any(None, str),
+    vol.Optional("adopt", default=True): bool,
+})
+@websocket_api.async_response
+async def ws_device_add_signal(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """A field found with the analysis tools, into a device (new or existing) and adopted as an entity."""
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        spec = _SIGNAL_SPEC(msg["signal"])
+        if not spec["name"].strip() or spec["name"] == "candidate":
+            raise vol.Invalid("give the signal a name")
+        signal = {k: spec[k] for k in ("name", "start", "length", "byte_order", "signed", "factor", "offset", "unit")}
+        device, message = await admin.async_add_signal(msg["entry_id"], msg["key"], signal, msg.get("device_id"),
+                                                       msg.get("device_name"), msg.get("message"), msg["adopt"])
+    except DefinitionError as err:
+        _definition_error(connection, msg, err)
+        return
+    except (vol.Invalid, HomeAssistantError) as err:
+        connection.send_error(msg["id"], "failed", str(err))
+        return
+    await _log(admin, connection, "add_signal", "signal_added",
+               {"device": device.name, "signal": f"{message}.{signal['name']}"}, device_id=device.id,
+               port_id=device.interface)
+    connection.send_result(msg["id"], admin.devices.device_view(device))

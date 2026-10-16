@@ -17,6 +17,10 @@ with known numbers:
 - CANopen node 5: heartbeat (operational) every second, silent for 10 s of every 60 (s 40-50); an
   emergency 0x8130 at s 20 of every 60, cleared (0000) at s 30.
 - OBD-II: answers 7DF 02 01 0C with 7E8 04 41 0C 1A F8 (1726 rpm).
+- A body controller for the reverse engineering tools: 0x3C0 at 10 Hz, byte 0 bit 2 = door open, bit 5 =
+  light on, byte 1 a rolling counter, bytes 2-3 cabin temperature 21.5 degC (0.1 degC, little endian), byte 4
+  the light level (0, or 80 while the light is on). "Pressing" happens over the bus: 6F0#xx sets the door
+  (bit 0) and the light (bit 1), as a test cannot open a real door.
 """
 
 from __future__ import annotations
@@ -77,7 +81,8 @@ def main() -> None:
     sock.bind((ifname,))
     start = time.monotonic()
     next_1hz = next_50hz = next_20hz = next_10hz = next_2hz = next_n2k = start
-    step = counter = sent = answered = n2k_seq = 0
+    next_body = start
+    step = counter = sent = answered = n2k_seq = body_counter = body = 0
     queue: list[tuple[float, bytes]] = []  # BAM data packets, 50 ms apart
 
     def send(can_id: int, data: bytes) -> None:
@@ -135,6 +140,12 @@ def main() -> None:
                 if pgn in (65265, 65266):
                     send(j1939_id(prio, pgn, 0x00), data)
             next_10hz += 0.1
+        if now >= next_body:
+            body_counter = (body_counter + 1) & 0xFF
+            light = bool(body & 2)
+            send(0x3C0, bytes([(0x04 if body & 1 else 0) | (0x20 if light else 0), body_counter, 0xD7, 0x00,
+                               80 if light else 0, 0, 0, 0]))
+            next_body += 0.1
         if now >= next_2hz:
             send(j1939_id(6, 65263, 0x00), J1939[(6, 65263)])
             next_2hz += 0.5
@@ -145,7 +156,7 @@ def main() -> None:
                 send(j1939_id(6, 127506, 0x23), data)
             n2k_seq = (n2k_seq + 1) & 7
             next_n2k += 1.5
-        wait = max(0.0, min([next_1hz, next_50hz, next_20hz, next_10hz, next_2hz, next_n2k]
+        wait = max(0.0, min([next_1hz, next_50hz, next_20hz, next_10hz, next_2hz, next_n2k, next_body]
                             + [d for d, _ in queue]) - time.monotonic())
         ready, _, _ = select.select([sock], [], [], wait)
         if ready:
@@ -155,6 +166,8 @@ def main() -> None:
             if raw == 0x7DF and data[:3] == b"\x02\x01\x0c":
                 send(0x7E8, bytes.fromhex("04410C1AF8CCCCCC"))
                 answered += 1
+            elif raw == 0x6F0 and data:
+                body = data[0] & 3
     print(f"sent {sent} frames, answered {answered} OBD requests in {time.monotonic() - start:.1f} s")
 
 

@@ -26,6 +26,8 @@ from homeassistant.helpers.service import async_register_admin_service
 
 from .can_port import CanFrame, IdMatcher, parse_id
 from .capture import trace_matcher
+from . import analysis, formats
+from .monitor import TX_KEY
 from .const import ATTR_ENTRY, DOMAIN, PERIODIC_MIN_MS, SERVICE_SEND
 from .periodic import PeriodicError
 from .signals import DefinitionError, Signal
@@ -37,7 +39,8 @@ if TYPE_CHECKING:
 _NOTE = vol.Optional("note", default="")  # every change can say why; shown in the activity log
 _LIMIT = vol.All(vol.Coerce(int), vol.Range(min=1, max=2000))
 _WAIT = vol.All(vol.Coerce(int), vol.Range(min=0, max=60000))
-ADMIN_SERVICES = {SERVICE_SEND, "save_periodic", "control_periodic", "capture", "clear_monitor", "create_from_template",
+ADMIN_SERVICES = {SERVICE_SEND, "save_periodic", "control_periodic", "capture", "convert_capture", "clear_monitor",
+                  "create_from_template", "add_signal",
                   "save_device", "delete_device", "set_signal", "import_dbc", "attach_dbc", "create_from_dbc"}
 EXPECT_WAIT = 1.0  # s, when wait_id is given without wait_ms
 
@@ -158,12 +161,18 @@ def describe(hass: HomeAssistant) -> dict[str, Any]:
             "send (admin): one frame, optionally waiting for a reply ID. Interfaces in listen-only mode cannot "
             "send. Never send to vehicles or machinery unless the user asked for that exact frame.",
             "save_periodic / control_periodic (admin): frames sent every period_ms.",
-            "capture (admin): record an interface to a candump log file in the config folder's woow_can/captures.",
+            "capture (admin): record an interface to a candump log file in the config folder's woow_can/captures; "
+            "convert_capture writes one as Vector ASC, SavvyCAN CSV or pcap. Uploaded ASC, CSV, PEAK TRC, OVMS "
+            "CRTD and pcap files open in the panel.",
             "Devices turn signals into Home Assistant entities. Known equipment: list_templates, then "
             "create_from_template {template, interface, params}; without groups it includes the protocol groups "
             "whose IDs the interface has seen. DBC files: import_dbc, attach_dbc (names and decodes frames), "
-            "create_from_dbc. Unknown frames: test_signal tries a bit field on recent frames; save_device stores "
-            "a definition (get_device shows the shape); set_signal adopts a signal or tunes its entity.",
+            "create_from_dbc. Unknown frames, with a person at the equipment: guided_capture (start = idle, next = "
+            "do the action, next = undo it, repeat, finish) ranks the bits an action changes; find_signal (start "
+            "with the value on the equipment's display, narrow with the next value) finds the field holding a "
+            "number; bit_activity shows which bits of an ID change; test_signal tries a field on recent frames; "
+            "add_signal puts a field into a device as an entity. save_device stores a whole definition "
+            "(get_device shows the shape); set_signal adopts a signal or tunes its entity.",
             "decode_frame shows what the definitions make of one frame; list_devices / get_device show current values.",
             "Give every change a short `note`: people read it in the panel's activity log.",
         ],
@@ -295,7 +304,18 @@ def async_register(hass: HomeAssistant) -> None:
 
     async def s_list_captures(call: ServiceCall) -> ServiceResponse:
         admin = _need_admin(hass)
-        return {"captures": await admin.async_list_captures(), "folder": admin.capture_dir}
+        return {"captures": await admin.async_list_captures(), "folder": admin.capture_dir,
+                "readable": list(formats.READ_FORMATS), "writable": list(formats.WRITE_FORMATS)}
+
+    async def s_convert_capture(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        try:
+            result = await admin.async_convert_capture(call.data["file"], call.data["format"])
+        except ValueError as err:
+            raise _invalid("bad_input", error=str(err)) from err
+        await record(call, "convert_capture", "capture_converted",
+                     {"file": call.data["file"], "target": result["name"], "frames": result["frames"]})
+        return {"capture": result} if call.return_response else None
 
     # ---- changes ----------------------------------------------------------------------------
     async def s_send(call: ServiceCall) -> ServiceResponse:
@@ -471,28 +491,69 @@ def async_register(hass: HomeAssistant) -> None:
             raise _invalid("bad_frame", error=str(err)) from err
         return {"frame": str(frame), "decoded": admin.decode(hub.entry.entry_id, frame.raw_id, frame.data)}
 
-    async def s_test_signal(call: ServiceCall) -> ServiceResponse:
-        """Try a candidate bit field on the recent frames of one ID (reverse engineering)."""
-        hub = resolve_interface(hass, call.data["interface"])
+    def _key(call: ServiceCall) -> int:
+        """The monitor key of can_id (+ direction): what the analysis tools work on."""
         try:
             can_id, extended = parse_id(call.data["can_id"])
+        except ValueError as err:
+            raise _invalid("bad_ids", error=str(err)) from err
+        return can_id | (0x80000000 if extended else 0) | (TX_KEY if call.data.get("direction") == "tx" else 0)
+
+    async def s_test_signal(call: ServiceCall) -> ServiceResponse:
+        """Try a candidate bit field on the recent frames of one ID (reverse engineering)."""
+        admin = _need_admin(hass)
+        hub = resolve_interface(hass, call.data["interface"])
+        key = _key(call)
+        try:
             sig = Signal(name="candidate", start=call.data["start"], length=call.data["length"],
                          byte_order=call.data["byte_order"], signed=call.data["signed"], factor=call.data["factor"],
                          offset=call.data["offset"])
-        except (ValueError, DefinitionError) as err:
-            raise _invalid("bad_ids", error=str(err)) from err
-        raw_id = can_id | (0x80000000 if extended else 0)
-        match = trace_matcher(lambda raw: raw & 0xDFFFFFFF == raw_id, None, errors=False)
-        snapshot = hub.trace.snapshot()
-        page = await hass.async_add_executor_job(snapshot.page, None, call.data["limit"], match,
-                                                 time.time() - call.data["seconds"])
-        series = [(f.t, sig.decode_raw(f.data)[1]) for f in reversed(page["frames"])]
-        numbers = [v for _, v in series if isinstance(v, (int, float))]
-        changes = sum(1 for (_, a), (_, b) in zip(series, series[1:]) if a != b)
-        return {"interface": hub.name, "frames": len(series), "distinct_values": len({v for _, v in series}),
-                "changes": changes, "min": min(numbers) if numbers else None, "max": max(numbers) if numbers else None,
-                "first": series[0][1] if series else None, "last": series[-1][1] if series else None,
-                "samples": [{"time": round(t, 3), "value": v} for t, v in series[-20:]]}
+        except DefinitionError as err:
+            raise _bad(err) from err
+        result = await admin.async_try_signal(hub.entry.entry_id, key, sig, call.data["seconds"], call.data["limit"],
+                                              samples=20)
+        return {"interface": hub.name, **result}
+
+    async def s_bit_activity(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        hub = resolve_interface(hass, call.data["interface"])
+        result = await admin.async_bits(hub.entry.entry_id, _key(call), call.data["seconds"], call.data["limit"])
+        frames = max(result["frames"] - 1, 1)
+        bits = [{"byte": i // 8, "bit": i % 8, "start": i, "changes": c, "change_rate": round(c / frames, 3),
+                 "ones_share": round(result["ones"][i] / max(result["frames"], 1), 3)}
+                for i, c in enumerate(result["changes"])]
+        return {"interface": hub.name, "id": result["id"], "frames": result["frames"], "length": result["length"],
+                "bytes": result["bytes"], "changing_bits": [b for b in bits if b["changes"]],
+                "constant_bits": sum(1 for b in bits if not b["changes"])}
+
+    async def s_find_signal(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        hub = resolve_interface(hass, call.data["interface"])
+        result = await admin.async_find(hub.entry.entry_id, call.data["action"], call.data.get("mode"),
+                                        call.data.get("value"), call.data.get("tolerance"), call.data["limit"])
+        return {"interface": hub.name, **result}
+
+    async def s_guided_capture(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        hub = resolve_interface(hass, call.data["interface"])
+        result = await admin.async_guided(hub.entry.entry_id, call.data["action"], call.data.get("label"),
+                                          call.data["limit"])
+        return {"interface": hub.name, **result}
+
+    async def s_add_signal(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        hub = resolve_interface(hass, call.data["interface"])
+        signal = {k: call.data[k] for k in ("name", "start", "length", "byte_order", "signed", "factor", "offset",
+                                            "unit")}
+        try:
+            device, message = await admin.async_add_signal(
+                hub.entry.entry_id, _key(call), signal, call.data.get("device"), call.data.get("device_name"),
+                call.data.get("message"), call.data["adopt"])
+        except DefinitionError as err:
+            raise _bad(err) from err
+        await record(call, "add_signal", "signal_added", {"device": device.name, "signal": f"{message}.{signal['name']}"},
+                     device_id=device.id, port_id=hub.entry.entry_id)
+        return {"device": _device_out(admin, device, False)} if call.return_response else None
 
     async def s_import_dbc(call: ServiceCall) -> ServiceResponse:
         admin = _need_admin(hass)
@@ -548,6 +609,9 @@ def async_register(hass: HomeAssistant) -> None:
     register("get_activity", s_get_activity, {vol.Optional("limit", default=50): _LIMIT}, SupportsResponse.ONLY)
     register("list_periodic", s_list_periodic, {}, SupportsResponse.ONLY)
     register("list_captures", s_list_captures, {}, SupportsResponse.ONLY)
+    register("convert_capture", s_convert_capture, {vol.Required("file"): cv.string,
+                                                    vol.Required("format"): vol.In(list(formats.WRITE_FORMATS)),
+                                                    _NOTE: cv.string}, SupportsResponse.OPTIONAL)
     register(SERVICE_SEND, s_send, SEND_SCHEMA, SupportsResponse.OPTIONAL)
     register("save_periodic", s_save_periodic, {
         vol.Required("interface"): cv.string, vol.Required("frame"): cv.string,
@@ -586,6 +650,7 @@ def async_register(hass: HomeAssistant) -> None:
              SupportsResponse.ONLY)
     register("test_signal", s_test_signal, {
         vol.Required("interface"): cv.string, vol.Required("can_id"): cv.string,
+        vol.Optional("direction", default="rx"): vol.In(["rx", "tx"]),
         vol.Required("start"): vol.All(vol.Coerce(int), vol.Range(min=0, max=511)),
         vol.Required("length"): vol.All(vol.Coerce(int), vol.Range(min=1, max=64)),
         vol.Optional("byte_order", default="little"): vol.In(["little", "big"]),
@@ -593,6 +658,31 @@ def async_register(hass: HomeAssistant) -> None:
         vol.Optional("offset", default=0.0): vol.Coerce(float),
         vol.Optional("seconds", default=60.0): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=86400)),
         vol.Optional("limit", default=2000): _LIMIT}, SupportsResponse.ONLY)
+    _direction = vol.Optional("direction", default="rx")
+    register("bit_activity", s_bit_activity, {
+        vol.Required("interface"): cv.string, vol.Required("can_id"): cv.string, _direction: vol.In(["rx", "tx"]),
+        vol.Optional("seconds", default=60.0): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=86400)),
+        vol.Optional("limit", default=2000): _LIMIT}, SupportsResponse.ONLY)
+    register("find_signal", s_find_signal, {
+        vol.Required("interface"): cv.string, vol.Required("action"): vol.In(["start", "narrow", "clear", "status"]),
+        vol.Optional("mode"): vol.In(list(analysis.MODES)), vol.Optional("value"): vol.Coerce(float),
+        vol.Optional("tolerance"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+        vol.Optional("limit", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=200))}, SupportsResponse.ONLY)
+    register("guided_capture", s_guided_capture, {
+        vol.Required("interface"): cv.string,
+        vol.Required("action"): vol.In(["start", "next", "finish", "cancel", "status"]),
+        vol.Optional("label"): cv.string,
+        vol.Optional("limit", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=200))}, SupportsResponse.ONLY)
+    register("add_signal", s_add_signal, {
+        vol.Required("interface"): cv.string, vol.Required("can_id"): cv.string, _direction: vol.In(["rx", "tx"]),
+        vol.Required("name"): cv.string,
+        vol.Required("start"): vol.All(vol.Coerce(int), vol.Range(min=0, max=511)),
+        vol.Required("length"): vol.All(vol.Coerce(int), vol.Range(min=1, max=64)),
+        vol.Optional("byte_order", default="little"): vol.In(["little", "big"]),
+        vol.Optional("signed", default=False): cv.boolean, vol.Optional("factor", default=1.0): vol.Coerce(float),
+        vol.Optional("offset", default=0.0): vol.Coerce(float), vol.Optional("unit", default=""): cv.string,
+        vol.Optional("device"): cv.string, vol.Optional("device_name"): cv.string, vol.Optional("message"): cv.string,
+        vol.Optional("adopt", default=True): cv.boolean, _NOTE: cv.string}, SupportsResponse.OPTIONAL)
     register("import_dbc", s_import_dbc, {vol.Required("name"): cv.string, vol.Required("content"): cv.string,
                                           vol.Optional("attach", default=[]): [cv.string], _NOTE: cv.string},
              SupportsResponse.OPTIONAL)

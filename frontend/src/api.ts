@@ -62,6 +62,7 @@ export interface OfflineInfo {
   file: string;
   port: string;
   offline: true;
+  format?: string;
   frames: number;
   truncated: boolean;
   start: number | null;
@@ -83,6 +84,9 @@ export interface Periodic {
   error: string | null;
   stopped_by: string | null;
 }
+
+export const FILE_FORMATS = ["log", "asc", "csv", "pcap"] as const;
+export type FileFormat = (typeof FILE_FORMATS)[number];
 
 export interface CaptureFile {
   name: string;
@@ -284,6 +288,105 @@ export interface SendResult {
 }
 
 // Raw id and frame flags, as the kernel and the backend write them
+// ---- reverse engineering ----
+export interface BitActivity {
+  id: string;
+  key: number;
+  frames: number;
+  length: number;
+  changes: number[]; // per bit (bit i = bit i % 8 of byte i / 8)
+  ones: number[];
+  bytes: { min: number; max: number; distinct: number }[];
+  from: number | null;
+  to: number | null;
+}
+
+export interface SignalSpec {
+  name?: string;
+  start: number;
+  length: number;
+  byte_order: "little" | "big";
+  signed: boolean;
+  factor: number;
+  offset: number;
+  unit?: string;
+}
+
+export interface Series {
+  id: string;
+  frames: number;
+  distinct_values: number;
+  changes: number;
+  min: number | null;
+  max: number | null;
+  first: unknown;
+  last: unknown;
+  samples: { time: number; value: unknown }[];
+}
+
+export interface Candidate extends SignalSpec {
+  id: string;
+  key: number;
+  value: number;
+}
+
+export interface FindResult {
+  left: number;
+  ids: number;
+  truncated: boolean;
+  steps: { mode: string; value: number | null; tolerance: number | null; left: number }[];
+  candidates: Candidate[];
+}
+
+export interface GuidedPhase {
+  label: string;
+  start: number;
+  end: number | null;
+  seconds: number;
+}
+
+export interface GuidedRow {
+  id: string;
+  key: number;
+  frames: number[];
+  only_in?: string;
+  confirmed?: boolean;
+  flipped?: { byte: number; bit: number; start: number; idle: number; action: number; confirmed: boolean }[];
+  moving?: { byte: number; bit: number; start: number }[];
+  shifted_bytes?: { byte: number; idle: [number, number]; action: [number, number]; confirmed: boolean }[];
+  counter_bits?: number[];
+  score: number;
+}
+
+export interface GuidedResult {
+  phases: GuidedPhase[];
+  running: boolean;
+  results?: GuidedRow[];
+  frames?: number[];
+  warning?: string;
+}
+
+export const FIND_MODES = ["equals", "increased", "decreased", "changed", "unchanged"] as const;
+export type FindMode = (typeof FIND_MODES)[number];
+
+/** The bits a field covers (bit i = bit i % 8 of byte i / 8), as the backend's signals count them. */
+export function fieldBits(start: number, length: number, order: "little" | "big"): number[] {
+  if (order === "little") return Array.from({ length }, (_, k) => start + k);
+  const msb = Math.floor(start / 8) * 8 + (7 - (start % 8));
+  return Array.from({ length }, (_, k) => {
+    const lin = msb + k;
+    return Math.floor(lin / 8) * 8 + (7 - (lin % 8));
+  });
+}
+
+/** start / length of the field between two clicked bits, in the given byte order. */
+export function fieldBetween(a: number, b: number, order: "little" | "big"): { start: number; length: number } {
+  if (order === "little") return { start: Math.min(a, b), length: Math.abs(a - b) + 1 };
+  const lin = (i: number) => Math.floor(i / 8) * 8 + (7 - (i % 8));
+  const [first, last] = lin(a) <= lin(b) ? [a, b] : [b, a];
+  return { start: first, length: lin(last) - lin(first) + 1 };
+}
+
 export const EFF = 0x80000000;
 export const RTR = 0x40000000;
 export const F_FD = 0x01;
@@ -441,8 +544,45 @@ export class Api {
     return this.hass().callWS({ type: "woow_can/capture/list" });
   }
 
-  capture(action: "start" | "stop" | "delete" | "open" | "close", args: { entry_id?: string; name?: string; source?: string }): Promise<{ name?: string; sources?: OfflineInfo[] }> {
+  capture(
+    action: "start" | "stop" | "delete" | "open" | "close" | "convert",
+    args: { entry_id?: string; name?: string; source?: string; format?: string },
+  ): Promise<{ name?: string; sources?: OfflineInfo[]; frames?: number }> {
     return this.hass().callWS({ type: "woow_can/capture/control", action, ...args });
+  }
+
+  analyzeBits(source: string, key: number, seconds?: number | null): Promise<BitActivity> {
+    return this.hass().callWS({ type: "woow_can/analyze/bits", source, key, limit: 2000, ...(seconds ? { seconds } : {}) });
+  }
+
+  analyzeTry(source: string, key: number, signal: SignalSpec, seconds?: number | null): Promise<Series> {
+    return this.hass().callWS({ type: "woow_can/analyze/try", source, key, signal, limit: 2000, ...(seconds ? { seconds } : {}) });
+  }
+
+  analyzeFind(
+    source: string,
+    action: "start" | "narrow" | "clear" | "status",
+    args: { mode?: FindMode; value?: number | null; tolerance?: number | null } = {},
+  ): Promise<FindResult> {
+    const extra: Record<string, unknown> = {};
+    if (args.mode) extra.mode = args.mode;
+    if (args.value != null) extra.value = args.value;
+    if (args.tolerance != null) extra.tolerance = args.tolerance;
+    return this.hass().callWS({ type: "woow_can/analyze/find", source, action, limit: 30, ...extra });
+  }
+
+  analyzeGuided(source: string, action: "start" | "next" | "finish" | "cancel" | "status", label?: string): Promise<GuidedResult> {
+    return this.hass().callWS({ type: "woow_can/analyze/guided", source, action, ...(label ? { label } : {}) });
+  }
+
+  addSignal(
+    entryId: string,
+    key: number,
+    signal: SignalSpec,
+    target: { device_id?: string; device_name?: string; message?: string },
+    adopt = true,
+  ): Promise<DeviceView> {
+    return this.hass().callWS({ type: "woow_can/devices/add_signal", entry_id: entryId, key, signal, adopt, ...target });
   }
 
   saveDevice(device: Record<string, unknown>): Promise<DeviceView> {

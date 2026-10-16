@@ -11,7 +11,8 @@
   read services refuse calls without it, and change services only return their result with it.
 - Home Assistant's MCP server (mcp_server, admin): the same services are tools of the LLM API "WOOW CAN".
 - Errors are readable messages: an unknown interface lists the existing ones; bad input names the field.
-- Sending and settings changes (send, save_periodic, control_periodic, capture, clear_monitor) need an admin.
+- Sending and changes (send, save_periodic, control_periodic, capture, convert_capture, clear_monitor, devices,
+  add_signal, DBC files) need an admin; the analysis tools only read.
 
 ## Workflow
 
@@ -31,7 +32,8 @@
    {item, action: start|stop|delete} — frames sent every period_ms (>= 10 ms). All stop when Home Assistant
    restarts.
 7. `capture` {interface, action: start|stop} and `list_captures` — candump log files under
-   `<config>/woow_can/captures`.
+   `<config>/woow_can/captures`. `convert_capture` {file, format: asc|csv|pcap|log} writes a copy for
+   CANalyzer / python-can (asc), SavvyCAN (csv, classic frames only) or Wireshark (pcap).
 8. `get_activity` — what changed, by whom, why. Give every send and change a short `note`.
 
 ## Devices: signals as entities
@@ -42,11 +44,27 @@
   empty = any), `nmea2000_dc` (instance, source_address), `canopen_node_monitor` (node_id, heartbeat_ms).
 - `list_devices` / `get_device` show current values, whether each message is still arriving, entity ids.
 - DBC files: `import_dbc` {name, content, attach}, `attach_dbc`, `create_from_dbc` {dbc, interface, messages}.
-- Unknown frames: find the ID with get_monitor (data_changes while a person operates the equipment), try a
-  field with `test_signal` {interface, can_id, start, length, byte_order, signed, factor, offset}, then
-  `save_device` with a definition (the shape is in `describe` -> device_definition and in `get_device`).
+- `save_device` stores a whole definition (the shape is in `describe` -> device_definition and in `get_device`).
 - `set_signal` {device, message, signal, adopted, min_interval, tolerance, timeout} adopts a signal as an
   entity or tunes it. `decode_frame` {interface, frame} shows what the definitions make of one frame.
+
+## Finding unknown signals (with a person at the equipment)
+
+- What does an action change? `guided_capture` {interface, action}: `start` (ask the person to leave the
+  equipment idle), wait 3-5 s, `next` (ask them to do the action and hold it), wait, `next` (undo it), repeat
+  the pair once or twice, then `finish`. Results are ranked: `flipped` bits followed the action
+  (`confirmed` = every time; a switch or lamp), `shifted_bytes` changed level, `only_in: action` IDs were only
+  sent during the action, `moving` bits only moved during it. Counter bits are recognised and left out.
+- Where is a number shown on a display? `find_signal` {interface, action: start, value, tolerance} with the
+  value shown now (not 0), then after it changed `find_signal` {action: narrow, mode: equals, value} with the
+  new value; repeat until one or two candidates are left. Without a value: `start` without one, then narrow
+  with mode increased / decreased / changed / unchanged.
+- `bit_activity` {interface, can_id} shows which bits of an ID change and how often (counters change on
+  every frame). `test_signal` {interface, can_id, start, length, byte_order, signed, factor, offset} decodes
+  a candidate field over recent frames.
+- `add_signal` {interface, can_id, name, start, length, byte_order, signed, factor, offset, unit, device or
+  device_name} makes the field an entity (1 bit: binary sensor). Bit i is bit i % 8 of byte i / 8;
+  big-endian (Motorola) fields start at their most significant bit.
 
 Interfaces can be named by config entry id, name (`CAN0`) or interface (`can0`).
 

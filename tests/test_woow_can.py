@@ -27,7 +27,7 @@ from custom_components.woow_can.can_port import (
 )
 from custom_components.woow_can.capture import (
     TraceBuffer,
-    export_text,
+    export_frames,
     log_line,
     parse_log_line,
     safe_name,
@@ -170,7 +170,7 @@ def test_trace_buffer_pages_and_logs():
     assert [f.seq for f in rx_only["frames"]] == [8, 6, 4]
     since = snap.page(since=1006.0)
     assert [f.seq for f in since["frames"]] == [8, 7, 6]
-    text = export_text(snap, "can0")
+    text = "".join(log_line("can0", *f) for f in export_frames(snap))
     lines = text.splitlines()
     assert lines[0] == "(0000001004.000000) can0 104#04 R" and lines[-1].endswith("200##1000102030405060708090A0B0C0D0E0F R")
     for line in lines:

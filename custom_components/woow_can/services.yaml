@@ -104,7 +104,39 @@ list_periodic:
   description: 'The periodic sends with their state. Call it with return_response: true.'
 list_captures:
   name: List recordings
-  description: 'Recorded candump log files. Call it with return_response: true.'
+  description: 'Recorded and uploaded log files (candump log, Vector ASC, SavvyCAN CSV, PEAK TRC, OVMS CRTD, pcap)
+    and the formats they can be converted to. Call it with return_response: true.'
+convert_capture:
+  name: Convert recording
+  description: 'Write a recording in another format next to it: candump log, Vector ASC (CANalyzer, CANoe, python-can),
+    SavvyCAN GVRET CSV or pcap (Wireshark). Admin only.'
+  fields:
+    file:
+      name: File
+      description: A name from list_captures, e.g. CAN0_20261016-120000.log.
+      required: true
+      example: CAN0_20261016-120000.log
+      selector:
+        text: null
+    format:
+      name: Format
+      description: log, asc, csv (classic frames only) or pcap.
+      required: true
+      example: asc
+      selector:
+        select:
+          options:
+          - log
+          - asc
+          - csv
+          - pcap
+          mode: dropdown
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      example: for the supplier's CANalyzer
+      selector:
+        text: null
 send:
   name: Send CAN frame
   description: Send one CAN / CAN FD frame, optionally waiting for a reply ID. Admin only; the interface must not
@@ -563,6 +595,16 @@ test_signal:
       example: '356'
       selector:
         text: null
+    direction:
+      name: Direction
+      description: rx (received, default) or tx (sent by WOOW CAN).
+      default: rx
+      selector:
+        select:
+          options:
+          - rx
+          - tx
+          mode: dropdown
     start:
       name: Start bit
       description: 'DBC numbering: Intel = least significant bit, Motorola = most significant bit.'
@@ -636,6 +678,300 @@ test_signal:
           min: 1
           max: 2000
           mode: box
+bit_activity:
+  name: Bit activity
+  description: 'Which bits of one ID change and how often, over its recent frames: bits that change on every frame
+    are counters or checksums, bits that never change are unused or fixed. Call it with return_response: true.'
+  fields:
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    can_id:
+      name: CAN ID
+      description: 'Hex: 1-3 digits for 11-bit IDs, more for 29-bit IDs.'
+      required: true
+      example: 18FF50E5
+      selector:
+        text: null
+    direction:
+      name: Direction
+      description: rx (received, default) or tx (sent by WOOW CAN).
+      default: rx
+      selector:
+        select:
+          options:
+          - rx
+          - tx
+          mode: dropdown
+    seconds:
+      name: Last seconds
+      description: How far back to look.
+      default: 60
+      selector:
+        number:
+          min: 0.1
+          max: 86400
+          step: 0.1
+          unit_of_measurement: s
+          mode: box
+    limit:
+      name: Frames
+      description: At most this many of the newest frames.
+      default: 2000
+      selector:
+        number:
+          min: 1
+          max: 2000
+          mode: box
+find_signal:
+  name: Find signal by value
+  description: 'Find the field that holds a value a person reads off a display or meter, like a memory scanner:
+    start with the value now shown (or without one, then say how it moved), let the value change, narrow with the
+    new value, repeat until one or a few fields are left. Tries bytes, words, nibbles and bits in both byte orders,
+    signed and unsigned, with the usual scalings (0.1, 0.01, 0.5 ..., offsets -40, -273 ...). Start with a value
+    that is not 0. Call it with return_response: true.'
+  fields:
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    action:
+      name: Action
+      description: start (a new search, with value or without), narrow (keep what fits mode / value), clear, status.
+      required: true
+      example: start
+      selector:
+        select:
+          options:
+          - start
+          - narrow
+          - clear
+          - status
+          mode: dropdown
+    mode:
+      name: Mode
+      description: 'For narrow: equals (needs value), increased, decreased, changed or unchanged since the last
+        step.'
+      example: equals
+      selector:
+        select:
+          options:
+          - equals
+          - increased
+          - decreased
+          - changed
+          - unchanged
+          mode: dropdown
+    value:
+      name: Value
+      description: The value shown now, in its unit (52.3 for 52.3 V).
+      example: 52.3
+      selector:
+        number:
+          min: -1000000
+          max: 1000000
+          step: any
+          mode: box
+    tolerance:
+      name: Tolerance
+      description: How far off the reading may be; default 1 % of the value, at least 0.05.
+      example: 0.05
+      selector:
+        number:
+          min: 0
+          max: 1000000
+          step: any
+          mode: box
+    limit:
+      name: Candidates shown
+      description: How many of the likeliest fields to return.
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 200
+          mode: box
+guided_capture:
+  name: Guided capture
+  description: 'Find what one action changes on the bus. start: the person leaves the equipment idle; next: the
+    person does the action (open the door, press the button, switch the light on) and keeps it so; optionally next
+    again: the person undoes it; finish: the IDs ranked by what differs: bits steady in both phases with another
+    value (a switch), bits that only move during the action, bytes that change level, IDs only sent during the action.
+    Give each phase a few seconds. Call it with return_response: true.'
+  fields:
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    action:
+      name: Action
+      description: start, next, finish, cancel or status.
+      required: true
+      example: start
+      selector:
+        select:
+          options:
+          - start
+          - next
+          - finish
+          - cancel
+          - status
+          mode: dropdown
+    label:
+      name: Label
+      description: What happens in the phase that starts now, e.g. door open.
+      example: door open
+      selector:
+        text: null
+    limit:
+      name: IDs shown
+      description: How many of the most changed IDs to return.
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 200
+          mode: box
+add_signal:
+  name: Add signal
+  description: 'Put a field found with find_signal, guided_capture or test_signal into a device: an existing one
+    (device) or a new one (device_name); the message for the ID is created when the device has none. 1-bit fields
+    become binary sensors, others sensors. Admin only.'
+  fields:
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    can_id:
+      name: CAN ID
+      description: 'Hex: 1-3 digits for 11-bit IDs, more for 29-bit IDs.'
+      required: true
+      example: '351'
+      selector:
+        text: null
+    direction:
+      name: Direction
+      description: rx (received, default) or tx (sent by WOOW CAN).
+      default: rx
+      selector:
+        select:
+          options:
+          - rx
+          - tx
+          mode: dropdown
+    name:
+      name: Name
+      description: The signal's name, also the entity's name.
+      required: true
+      example: Battery voltage
+      selector:
+        text: null
+    start:
+      name: Start bit
+      description: 'Bit position: bit i is bit i % 8 of byte i / 8; big-endian fields start at their most significant
+        bit.'
+      required: true
+      example: 0
+      selector:
+        number:
+          min: 0
+          max: 511
+          mode: box
+    length:
+      name: Length
+      description: Number of bits.
+      required: true
+      example: 16
+      selector:
+        number:
+          min: 1
+          max: 64
+          mode: box
+    byte_order:
+      name: Byte order
+      description: little (Intel) or big (Motorola).
+      default: little
+      selector:
+        select:
+          options:
+          - little
+          - big
+          mode: dropdown
+    signed:
+      name: Signed
+      description: Two's complement.
+      default: false
+      selector:
+        boolean: null
+    factor:
+      name: Factor
+      description: Physical = raw x factor + offset.
+      default: 1
+      selector:
+        number:
+          min: -1000000
+          max: 1000000
+          step: any
+          mode: box
+    offset:
+      name: Offset
+      description: Physical = raw x factor + offset.
+      default: 0
+      selector:
+        number:
+          min: -1000000
+          max: 1000000
+          step: any
+          mode: box
+    unit:
+      name: Unit
+      description: V, A, °C, %, km/h ... (sets the device class when known).
+      example: V
+      selector:
+        text: null
+    device:
+      name: Device
+      description: An existing device on this interface (name or id); leave empty to make a new one.
+      example: Sim BMS
+      selector:
+        text: null
+    device_name:
+      name: New device name
+      description: 'For a new device; default: the interface and the ID.'
+      example: Forklift
+      selector:
+        text: null
+    message:
+      name: Message name
+      description: For a new message; default ID_ and the ID, e.g. ID_351.
+      example: Status
+      selector:
+        text: null
+    adopt:
+      name: Make an entity
+      description: Create the entity now (default) or only add the signal to the definition.
+      default: true
+      selector:
+        boolean: null
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      example: voltage found with find_signal
+      selector:
+        text: null
 import_dbc:
   name: Import a DBC file
   description: Store DBC text under the configuration directory's woow_can/dbc folder and report what was understood.

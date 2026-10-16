@@ -630,6 +630,7 @@ export class WoowCanMonitor extends LitElement {
             : nothing}
           <button @click=${() => this.pause(idHex(row.raw))}>${t("row_trace")}</button>
           <button @click=${() => this.notchRow(row)}>${t("row_notch")}</button>
+          <button @click=${() => this.dispatchEvent(new CustomEvent("analyze-id", { detail: row.key }))}>${t("row_analyze")}</button>
         </div>`;
   }
 

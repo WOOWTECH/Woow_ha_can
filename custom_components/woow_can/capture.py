@@ -11,7 +11,7 @@ SavvyCAN, python-can and Wireshark's tools read:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 import os
 import re
@@ -102,6 +102,17 @@ class TraceSnapshot:
         data = self.long.get(seq, data8[:length]) if length > 8 else data8[:length]
         return TraceFrame(seq, ts, raw, data, flags)
 
+    def seq_at(self, t: float) -> int:
+        """The first frame at or after time t (frames are kept in arrival order)."""
+        lo, hi = self.first, self.end
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if REC.unpack_from(self.buf, (mid % self.capacity) * REC.size)[0] < t:
+                lo = mid + 1
+            else:
+                hi = mid
+        return lo
+
     def frames(self, start: int | None = None, end: int | None = None) -> Iterator[TraceFrame]:
         for seq in range(max(self.first, start or 0), min(self.end, self.end if end is None else end)):
             yield self.frame(seq)
@@ -185,42 +196,10 @@ def parse_log_line(line: str) -> tuple[str, float, int, bytes, int] | None:
     return ifname, ts, raw, data, flags
 
 
-def read_log(path: str, limit: int) -> tuple[dict[str, list[tuple[float, int, bytes, int]]], int, int]:
-    """Blocking: frames of a candump log by interface (the last `limit` of each), lines read, lines skipped."""
-    out: dict[str, list[tuple[float, int, bytes, int]]] = {}
-    lines = skipped = 0
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            lines += 1
-            parsed = parse_log_line(line)
-            if parsed is None:
-                if line.strip():
-                    skipped += 1
-                continue
-            ifname, *frame = parsed
-            frames = out.setdefault(ifname, [])
-            frames.append(tuple(frame))  # type: ignore[arg-type]
-            if len(frames) > 2 * limit:
-                del frames[:-limit]
-    for ifname, frames in out.items():
-        del frames[:-limit]
-    return out, lines, skipped
-
-
-def write_log(path: str, ifname: str, frames: Iterable[TraceFrame]) -> int:
-    """Blocking: write frames as a candump log; returns the number written."""
-    n = 0
-    with open(path, "w", encoding="ascii") as fh:
-        for frame in frames:
-            fh.write(log_line(ifname, frame.t, frame.raw, frame.data, frame.flags))
-            n += 1
-    return n
-
-
-def export_text(snapshot: TraceSnapshot, ifname: str, match: Callable[[TraceFrame], bool] | None = None) -> str:
-    """Blocking: the buffer as candump log text."""
-    return "".join(log_line(ifname, f.t, f.raw, f.data, f.flags) for f in snapshot.frames()
-                   if match is None or match(f))
+def export_frames(snapshot: TraceSnapshot, match: Callable[[TraceFrame], bool] | None = None
+                  ) -> list[tuple[float, int, bytes, int]]:
+    """Blocking: the buffer's frames (time, raw id, data, flags), oldest first."""
+    return [(f.t, f.raw, f.data, f.flags) for f in snapshot.frames() if match is None or match(f)]
 
 
 class Recording:

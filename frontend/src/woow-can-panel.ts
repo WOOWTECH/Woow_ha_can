@@ -27,14 +27,15 @@ import {
 import { Key, Translate, makeTranslate } from "./i18n";
 import { shared } from "./styles";
 import "./views/activity";
+import "./views/analyze";
 import "./views/capture";
 import { MAX_CHARTS } from "./views/devices";
 import "./views/monitor";
 import "./views/overview";
 import "./views/send";
 
-type Tab = "overview" | "monitor" | "devices" | "send" | "capture" | "activity";
-const TABS: Tab[] = ["overview", "monitor", "devices", "send", "capture", "activity"];
+type Tab = "overview" | "monitor" | "analyze" | "devices" | "send" | "capture" | "activity";
+const TABS: Tab[] = ["overview", "monitor", "analyze", "devices", "send", "capture", "activity"];
 const SIGNAL_POINTS = 300; // samples kept per numeric signal for the charts
 const ACTIVITY_KEEP = 500;
 const HISTORY_POINTS = 300; // load samples kept per interface (one a second)
@@ -54,6 +55,7 @@ export class WoowCanPanel extends LitElement {
   @state() private history: Record<string, number[]> = {};
   @state() private source = storageGet<string>("woow_can.source", "");
   @state() private draft: { frame: string; entryId: string; n: number } | null = null;
+  @state() private focusId: { key: number; n: number } | null = null; // an ID opened from the monitor in Analyze
   @state() private devices: Record<string, DeviceView> = {};
   @state() private values: Values = {};
   @state() private signalHistory: Record<string, [number, number][]> = {};
@@ -288,7 +290,21 @@ export class WoowCanPanel extends LitElement {
             this.draft = { ...e.detail, n: (this.draft?.n ?? 0) + 1 };
             this.setTab("send");
           }}
+          @analyze-id=${(e: CustomEvent<number>) => {
+            this.focusId = { key: e.detail, n: (this.focusId?.n ?? 0) + 1 };
+            this.setTab("analyze");
+          }}
         ></woow-can-monitor>`;
+      case "analyze":
+        return html`<woow-can-analyze
+          .interfaces=${interfaces}
+          .offline=${this.offline}
+          .devices=${Object.values(this.devices).sort((a, b) => a.name.localeCompare(b.name))}
+          .source=${this.source}
+          .focusId=${this.focusId}
+          .t=${this.t}
+          .api=${this.api}
+        ></woow-can-analyze>`;
       case "devices":
         return html`<woow-can-devices
           .interfaces=${interfaces}

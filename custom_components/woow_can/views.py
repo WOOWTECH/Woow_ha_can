@@ -16,12 +16,16 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util, slugify
 
 from .can_port import IdMatcher
-from .capture import export_text, safe_name, trace_matcher
-from . import dbc
+from .capture import export_frames, safe_name, trace_matcher
+from . import dbc, formats
 from .const import DOMAIN
 from .signals import DefinitionError
 
 MAX_UPLOAD = 100 * 1024 * 1024
+
+
+def safe_port(port: str) -> str:
+    return "".join(c if c.isalnum() or c in "._-" else "_" for c in port) or "can"
 
 
 def _admin(request: web.Request):
@@ -47,9 +51,11 @@ class CaptureFileView(HomeAssistantView):
             raise web.HTTPBadRequest(text=str(err)) from err
         if not os.path.isfile(path):
             raise web.HTTPNotFound(text="no such capture")
+        ext = os.path.splitext(path)[1].lstrip(".").lower()
+        content_type = formats.CONTENT_TYPES.get(ext, "text/plain")
         return web.FileResponse(path, headers={
             "Content-Disposition": f'attachment; filename="{os.path.basename(path)}"',
-            "Content-Type": "text/plain; charset=us-ascii"})
+            "Content-Type": content_type if ext == "pcap" else f"{content_type}; charset=us-ascii"})
 
 
 class CaptureUploadView(HomeAssistantView):
@@ -74,7 +80,7 @@ class CaptureUploadView(HomeAssistantView):
 
 
 class TraceExportView(HomeAssistantView):
-    """The trace buffer of an interface (or opened capture) as a candump log."""
+    """The trace buffer of an interface (or opened capture) as a file: ?format=log (default), asc, csv, pcap."""
 
     url = "/api/woow_can/export/{source}"
     name = "api:woow_can:export"
@@ -87,11 +93,19 @@ class TraceExportView(HomeAssistantView):
             ids = IdMatcher(request.query.get("ids", "")) if request.query.get("ids") else None
         except (HomeAssistantError, ValueError) as err:
             raise web.HTTPBadRequest(text=str(err)) from err
+        fmt = request.query.get("format", "log")
+        if fmt not in formats.WRITE_FORMATS:
+            raise web.HTTPBadRequest(text=f"format: one of {', '.join(formats.WRITE_FORMATS)}")
         match = trace_matcher(ids, request.query.get("direction") or None)
         snapshot = src.trace.snapshot()
-        text = await request.app[KEY_HASS].async_add_executor_job(export_text, snapshot, src.port, match)
-        filename = f"{src.port}_{dt_util.now().strftime('%Y%m%d-%H%M%S')}.log"
-        return web.Response(text=text, content_type="text/plain", charset="us-ascii",
+
+        def build() -> bytes:
+            return formats.write(fmt, {src.port: export_frames(snapshot, match)})
+
+        body = await request.app[KEY_HASS].async_add_executor_job(build)
+        filename = f"{safe_port(src.port)}_{dt_util.now().strftime('%Y%m%d-%H%M%S')}.{fmt}"
+        return web.Response(body=body, content_type=formats.CONTENT_TYPES[fmt],
+                            charset=None if fmt == "pcap" else "us-ascii",
                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 

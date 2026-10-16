@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — 2026-10-17
+
+Finding unknown signals, and log files in the formats other tools use.
+
+- **Analyze tab** (and services for agents): a **guided capture** that ranks what an action changes over alternating idle / action phases (bits that follow the action every time, bytes that change level, IDs only sent during the action; rolling counters recognised by their carry pattern and left out; robust to pressing Next a moment early or late); **find a signal by its value** like a memory scanner (bytes, words, nibbles and bits, both byte orders, signed and unsigned, common scalings and offsets; narrow by a new value or by increased / decreased / changed / unchanged); a **bit heat map** of one ID where two taps set a field and its decoded values show at once; **add to a device** turns a found field into an entity. The Monitor tab's ID details link to it.
+- New services: `guided_capture`, `find_signal`, `bit_activity`, `add_signal`, `convert_capture`; `test_signal` takes a direction.
+- **Log formats**: recordings and the buffer download as candump log, Vector ASC (CANalyzer, CANoe, python-can), SavvyCAN GVRET CSV or pcap (Wireshark); uploads of candump, ASC, CSV, PEAK TRC (1.0-2.1), OVMS CRTD and pcap open in the monitor. Conversions stream, so large files fit. Checked against python-can's ASC, TRC and candump readers and writers in CI.
+- The simulator gains a body controller (door and light, "pressed" with 6F0#01 / 6F0#02); tools/analysis_check.py checks the formats and the analysis tools end to end.
+
 ## 0.3.1 — 2026-10-16
 
 - The factor and offset fields of `test_signal` take any step (Home Assistant refuses number steps under 0.001, which failed hassfest). A test now checks every selector in services.yaml with Home Assistant's own schema. No change to how the integration works.

@@ -1,10 +1,10 @@
-// Recordings tab: record interfaces to candump log files, download / upload / open them, export the buffer.
+// Recordings tab: record interfaces to candump log files, download / upload / open / convert them, export the buffer.
 
 import { LitElement, css, html, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 
-import { Api, CaptureFile, InterfaceInfo, OfflineInfo, define, errorText } from "../api";
-import { Translate, ago, bytes } from "../i18n";
+import { Api, CaptureFile, FILE_FORMATS, FileFormat, InterfaceInfo, OfflineInfo, define, errorText } from "../api";
+import { Translate, ago, bytes, isKey } from "../i18n";
 import { shared } from "../styles";
 
 export class WoowCanCapture extends LitElement {
@@ -17,6 +17,7 @@ export class WoowCanCapture extends LitElement {
   @state() private message: { ok: boolean; text: string } | null = null;
   @state() private deleting = "";
   @state() private busy = false;
+  @state() private format: FileFormat = "log";
 
   static styles = [
     shared,
@@ -82,6 +83,34 @@ export class WoowCanCapture extends LitElement {
     });
   }
 
+  private ext(name: string): string {
+    const dot = name.lastIndexOf(".");
+    return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
+  }
+
+  private formatName(format: string): string {
+    const key = `fmt_${format}`;
+    return isKey(key) ? this.t(key) : format;
+  }
+
+  private async convert(name: string): Promise<void> {
+    await this.run(async () => {
+      const res = await this.api.capture("convert", { name, format: this.format });
+      this.message = { ok: true, text: this.t("converted", { name: res.name ?? "", n: (res.frames ?? 0).toLocaleString() }) };
+      this.changed();
+    });
+  }
+
+  private formatPicker() {
+    const t = this.t;
+    return html`<label class="row" style="gap:6px">
+      <span class="muted">${t("file_format")}</span>
+      <select .value=${this.format} @change=${(e: Event) => (this.format = (e.target as HTMLSelectElement).value as FileFormat)}>
+        ${FILE_FORMATS.map((f) => html`<option value=${f} ?selected=${f === this.format}>${t(`fmt_${f}`)}</option>`)}
+      </select>
+    </label>`;
+  }
+
   private async open(name: string): Promise<void> {
     await this.run(async () => {
       const res = await this.api.capture("open", { name });
@@ -93,8 +122,12 @@ export class WoowCanCapture extends LitElement {
   render() {
     const t = this.t;
     return html`<div class="card">
-        <h2>${t("capture_title")}</h2>
+        <div class="row">
+          <h2 class="grow">${t("capture_title")}</h2>
+          ${this.formatPicker()}
+        </div>
         <div class="muted">${t("capture_hint")}</div>
+        ${this.format === "csv" ? html`<div class="muted" style="margin-top:4px">${t("csv_note")}</div>` : nothing}
         <div class="ifaces" style="margin-top:12px">
           ${this.interfaces.map((i) => html`<div class="row">
             <b>${i.name}</b><span class="muted">${i.port}</span>
@@ -112,7 +145,7 @@ export class WoowCanCapture extends LitElement {
                     this.changed();
                   })}>${t("record")}</button>`}
             <button title=${t("export_hint", { n: (i.trace.end - i.trace.first).toLocaleString() })}
-              @click=${() => this.run(() => this.api.download(`/api/woow_can/export/${i.id}`))}>${t("export")}</button>
+              @click=${() => this.run(() => this.api.download(`/api/woow_can/export/${i.id}?format=${this.format}`))}>${t("export")}</button>
           </div>`)}
         </div>
         ${this.message
@@ -122,9 +155,9 @@ export class WoowCanCapture extends LitElement {
       <div class="card">
         <div class="row">
           <h2 class="grow">${t("files_title")}</h2>
-          <label><button @click=${() => (this.renderRoot.querySelector("#upload") as HTMLInputElement)?.click()}>
+          <label><button title=${t("upload_hint")} @click=${() => (this.renderRoot.querySelector("#upload") as HTMLInputElement)?.click()}>
             ${t("upload")}</button></label>
-          <input id="upload" type="file" accept=".log,.txt" @change=${this.upload} />
+          <input id="upload" type="file" accept=".log,.txt,.asc,.csv,.trc,.crtd,.pcap" @change=${this.upload} />
         </div>
         ${this.files.length === 0
           ? html`<div class="empty">${t("files_empty")}</div>`
@@ -138,6 +171,9 @@ export class WoowCanCapture extends LitElement {
                     <button class="link" @click=${() =>
                       this.run(() => this.api.download(`/api/woow_can/captures/${encodeURIComponent(f.name)}`))}>${t("download")}</button>
                     <button class="link" ?disabled=${f.recording} @click=${() => this.open(f.name)}>${t("open")}</button>
+                    <button class="link" ?disabled=${f.recording || this.busy || this.ext(f.name) === this.format}
+                      title=${t("convert_hint", { fmt: t(`fmt_${this.format}`) })}
+                      @click=${() => this.convert(f.name)}>${t("convert")} → ${this.format.toUpperCase()}</button>
                     ${this.deleting === f.name
                       ? html`<span>${t("delete_confirm", { name: f.name })}</span>
                           <button class="danger" @click=${() =>
@@ -157,7 +193,7 @@ export class WoowCanCapture extends LitElement {
           ? html`<h2 style="margin-top:16px">${t("offline_title")}</h2>
               ${this.offline.map((o) => html`<div class="row">
                 <span class="mono grow">${o.name}</span>
-                <span class="muted">${o.frames.toLocaleString()}${o.truncated ? ` · ${t("truncated", { n: o.frames })}` : ""}</span>
+                <span class="muted">${o.format && o.format !== "log" ? `${this.formatName(o.format)} · ` : ""}${o.frames.toLocaleString()}${o.truncated ? ` · ${t("truncated", { n: o.frames })}` : ""}</span>
                 <button class="link" @click=${() => this.dispatchEvent(new CustomEvent("open-source", { detail: o.id }))}>
                   ${t("tab_monitor")}</button>
                 <button class="link" @click=${() => this.run(() => this.api.capture("close", { source: o.id }))}>${t("close")}</button>

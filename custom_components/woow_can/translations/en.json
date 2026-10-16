@@ -215,7 +215,25 @@
     },
     "list_captures": {
       "name": "List recordings",
-      "description": "Recorded candump log files. Call it with return_response: true."
+      "description": "Recorded and uploaded log files (candump log, Vector ASC, SavvyCAN CSV, PEAK TRC, OVMS CRTD, pcap) and the formats they can be converted to. Call it with return_response: true."
+    },
+    "convert_capture": {
+      "name": "Convert recording",
+      "description": "Write a recording in another format next to it: candump log, Vector ASC (CANalyzer, CANoe, python-can), SavvyCAN GVRET CSV or pcap (Wireshark). Admin only.",
+      "fields": {
+        "file": {
+          "name": "File",
+          "description": "A name from list_captures, e.g. CAN0_20261016-120000.log."
+        },
+        "format": {
+          "name": "Format",
+          "description": "log, asc, csv (classic frames only) or pcap."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Why, in a few words; shown in the activity log."
+        }
+      }
     },
     "send": {
       "name": "Send CAN frame",
@@ -517,6 +535,10 @@
           "name": "CAN ID",
           "description": "Hex. 1-3 digits = 11-bit, longer = 29-bit."
         },
+        "direction": {
+          "name": "Direction",
+          "description": "rx (received, default) or tx (sent by WOOW CAN)."
+        },
         "start": {
           "name": "Start bit",
           "description": "DBC numbering: Intel = least significant bit, Motorola = most significant bit."
@@ -548,6 +570,154 @@
         "limit": {
           "name": "Limit",
           "description": "Frames to read at most."
+        }
+      }
+    },
+    "bit_activity": {
+      "name": "Bit activity",
+      "description": "Which bits of one ID change and how often, over its recent frames: bits that change on every frame are counters or checksums, bits that never change are unused or fixed. Call it with return_response: true.",
+      "fields": {
+        "interface": {
+          "name": "Interface",
+          "description": "Name (CAN0), interface (can0) or config entry id."
+        },
+        "can_id": {
+          "name": "CAN ID",
+          "description": "Hex: 1-3 digits for 11-bit IDs, more for 29-bit IDs."
+        },
+        "direction": {
+          "name": "Direction",
+          "description": "rx (received, default) or tx (sent by WOOW CAN)."
+        },
+        "seconds": {
+          "name": "Last seconds",
+          "description": "How far back to look."
+        },
+        "limit": {
+          "name": "Frames",
+          "description": "At most this many of the newest frames."
+        }
+      }
+    },
+    "find_signal": {
+      "name": "Find signal by value",
+      "description": "Find the field that holds a value a person reads off a display or meter, like a memory scanner: start with the value now shown (or without one, then say how it moved), let the value change, narrow with the new value, repeat until one or a few fields are left. Tries bytes, words, nibbles and bits in both byte orders, signed and unsigned, with the usual scalings (0.1, 0.01, 0.5 ..., offsets -40, -273 ...). Start with a value that is not 0. Call it with return_response: true.",
+      "fields": {
+        "interface": {
+          "name": "Interface",
+          "description": "Name (CAN0), interface (can0) or config entry id."
+        },
+        "action": {
+          "name": "Action",
+          "description": "start (a new search, with value or without), narrow (keep what fits mode / value), clear, status."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "For narrow: equals (needs value), increased, decreased, changed or unchanged since the last step."
+        },
+        "value": {
+          "name": "Value",
+          "description": "The value shown now, in its unit (52.3 for 52.3 V)."
+        },
+        "tolerance": {
+          "name": "Tolerance",
+          "description": "How far off the reading may be; default 1 % of the value, at least 0.05."
+        },
+        "limit": {
+          "name": "Candidates shown",
+          "description": "How many of the likeliest fields to return."
+        }
+      }
+    },
+    "guided_capture": {
+      "name": "Guided capture",
+      "description": "Find what one action changes on the bus. start: the person leaves the equipment idle; next: the person does the action (open the door, press the button, switch the light on) and keeps it so; optionally next again: the person undoes it; finish: the IDs ranked by what differs: bits steady in both phases with another value (a switch), bits that only move during the action, bytes that change level, IDs only sent during the action. Give each phase a few seconds. Call it with return_response: true.",
+      "fields": {
+        "interface": {
+          "name": "Interface",
+          "description": "Name (CAN0), interface (can0) or config entry id."
+        },
+        "action": {
+          "name": "Action",
+          "description": "start, next, finish, cancel or status."
+        },
+        "label": {
+          "name": "Label",
+          "description": "What happens in the phase that starts now, e.g. door open."
+        },
+        "limit": {
+          "name": "IDs shown",
+          "description": "How many of the most changed IDs to return."
+        }
+      }
+    },
+    "add_signal": {
+      "name": "Add signal",
+      "description": "Put a field found with find_signal, guided_capture or test_signal into a device: an existing one (device) or a new one (device_name); the message for the ID is created when the device has none. 1-bit fields become binary sensors, others sensors. Admin only.",
+      "fields": {
+        "interface": {
+          "name": "Interface",
+          "description": "Name (CAN0), interface (can0) or config entry id."
+        },
+        "can_id": {
+          "name": "CAN ID",
+          "description": "Hex: 1-3 digits for 11-bit IDs, more for 29-bit IDs."
+        },
+        "direction": {
+          "name": "Direction",
+          "description": "rx (received, default) or tx (sent by WOOW CAN)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "The signal's name, also the entity's name."
+        },
+        "start": {
+          "name": "Start bit",
+          "description": "Bit position: bit i is bit i % 8 of byte i / 8; big-endian fields start at their most significant bit."
+        },
+        "length": {
+          "name": "Length",
+          "description": "Number of bits."
+        },
+        "byte_order": {
+          "name": "Byte order",
+          "description": "little (Intel) or big (Motorola)."
+        },
+        "signed": {
+          "name": "Signed",
+          "description": "Two's complement."
+        },
+        "factor": {
+          "name": "Factor",
+          "description": "Physical = raw x factor + offset."
+        },
+        "offset": {
+          "name": "Offset",
+          "description": "Physical = raw x factor + offset."
+        },
+        "unit": {
+          "name": "Unit",
+          "description": "V, A, °C, %, km/h ... (sets the device class when known)."
+        },
+        "device": {
+          "name": "Device",
+          "description": "An existing device on this interface (name or id); leave empty to make a new one."
+        },
+        "device_name": {
+          "name": "New device name",
+          "description": "For a new device; default: the interface and the ID."
+        },
+        "message": {
+          "name": "Message name",
+          "description": "For a new message; default ID_ and the ID, e.g. ID_351."
+        },
+        "adopt": {
+          "name": "Make an entity",
+          "description": "Create the entity now (default) or only add the signal to the definition."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Why, in a few words; shown in the activity log."
         }
       }
     },
