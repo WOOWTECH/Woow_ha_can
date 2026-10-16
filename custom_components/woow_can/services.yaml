@@ -1,0 +1,44 @@
+send:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: woow_can
+    can_id:
+      required: true
+      example: "123"
+      selector:
+        text:
+    data:
+      example: "11 22 33 44"
+      selector:
+        text:
+    extended:
+      selector:
+        boolean:
+    fd:
+      default: false
+      selector:
+        boolean:
+    brs:
+      default: false
+      selector:
+        boolean:
+    rtr:
+      default: false
+      selector:
+        boolean:
+    wait_id:
+      example: "7E8"
+      selector:
+        text:
+    wait_ms:
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 60000
+          step: 10
+          unit_of_measurement: ms
+          mode: box
