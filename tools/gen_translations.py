@@ -282,6 +282,151 @@ data = {
                 "note": {"name": T("Note", "備註"), "description": T("Why, in a few words; shown in the activity log.", "為什麼要做，簡短說明；會顯示在活動紀錄。")},
             },
         },
+        "list_templates": {
+            "name": T("List device templates", "列出裝置範本"),
+            "description": T("Built-in and local device templates (batteries, J1939, NMEA 2000, CANopen) with their "
+                             "parameters, message groups, sources and confidence. Call it with return_response: true.",
+                             "列出內建與本機的裝置範本（電池、J1939、NMEA 2000、CANopen），含參數、訊息群組、出處與可信度。"
+                             "要加 return_response: true。"),
+            "fields": {"category": {"name": T("Category", "類別"),
+                                    "description": T("battery, vehicle, marine or industrial.", "battery、vehicle、marine 或 industrial。")}},
+        },
+        "create_from_template": {
+            "name": T("Create a device from a template", "由範本建立裝置"),
+            "description": T("Create a device whose signals become entities. Without groups, the message groups whose "
+                             "IDs the interface has already seen are included. Admin only.",
+                             "建立裝置，訊號會變成實體。沒指定群組時，會納入介面上已經出現過的訊息群組。限管理員。"),
+            "fields": {
+                "template": {"name": T("Template", "範本"), "description": T("Template id or name.", "範本 ID 或名稱。")},
+                "interface": {"name": T("Interface", "介面"), "description": T("Name (CAN0), interface (can0) or config entry id.", "名稱（CAN0）、介面（can0）或設定項目 ID。")},
+                "name": {"name": T("Name", "名稱"), "description": T("Device name; default: the template's.", "裝置名稱；預設用範本的。")},
+                "params": {"name": T("Parameters", "參數"), "description": T("Template parameters, e.g. node_id or source_address.", "範本參數，例如 node_id、source_address。")},
+                "groups": {"name": T("Message groups", "訊息群組"), "description": T("Optional groups to include; empty = detect from traffic.", "要納入的選用群組；不填＝依實際流量判斷。")},
+                "note": {"name": T("Note", "備註"), "description": T("Why, in a few words; shown in the activity log.", "為什麼要做，簡短說明；會顯示在活動紀錄。")},
+            },
+        },
+        "list_devices": {
+            "name": T("List devices", "列出裝置"),
+            "description": T("Devices with their messages, current values, freshness and entity ids. Call it with "
+                             "return_response: true.", "列出裝置、訊息、目前數值、是否持續收到、實體 ID。要加 return_response: true。"),
+            "fields": {"interface": {"name": T("Interface", "介面"), "description": T("Only devices on this interface.", "只列這個介面上的裝置。")}},
+        },
+        "get_device": {
+            "name": T("Get a device", "讀取裝置"),
+            "description": T("One device with its full definition (messages, signals, entity settings) and current "
+                             "values. Call it with return_response: true.",
+                             "讀取一個裝置的完整定義（訊息、訊號、實體設定）和目前數值。要加 return_response: true。"),
+            "fields": {"device": {"name": T("Device", "裝置"), "description": T("Device name or id.", "裝置名稱或 ID。")}},
+        },
+        "save_device": {
+            "name": T("Save a device", "儲存裝置"),
+            "description": T("Create or replace a device from its JSON definition (get_device shows the shape): "
+                             "interface, messages with can_id or pgn, signals with start, length, byte_order, signed, "
+                             "factor, offset, unit, and an entity block on the signals that become entities. Admin only.",
+                             "用 JSON 定義建立或取代裝置（格式可參考 get_device）：介面、訊息（can_id 或 pgn）、訊號（start、"
+                             "length、byte_order、signed、factor、offset、unit），要變成實體的訊號加上 entity。限管理員。"),
+            "fields": {
+                "device": {"name": T("Device", "裝置"), "description": T("The device definition.", "裝置定義。")},
+                "note": {"name": T("Note", "備註"), "description": T("Why, in a few words; shown in the activity log.", "為什麼要做，簡短說明；會顯示在活動紀錄。")},
+            },
+        },
+        "delete_device": {
+            "name": T("Delete a device", "刪除裝置"),
+            "description": T("Delete a device and its entities. Admin only.", "刪除裝置和它的實體。限管理員。"),
+            "fields": {
+                "device": {"name": T("Device", "裝置"), "description": T("Device name or id.", "裝置名稱或 ID。")},
+                "note": {"name": T("Note", "備註"), "description": T("Why, in a few words; shown in the activity log.", "為什麼要做，簡短說明；會顯示在活動紀錄。")},
+            },
+        },
+        "set_signal": {
+            "name": T("Change a signal's entity", "修改訊號的實體"),
+            "description": T("Turn a signal into an entity or back, or change its entity settings: minimum interval "
+                             "between updates, tolerance, timeout, name, enabled. Admin only.",
+                             "把訊號變成實體或取消，或修改實體設定：最短更新間隔、容差、逾時、名稱、是否啟用。限管理員。"),
+            "fields": {
+                "device": {"name": T("Device", "裝置"), "description": T("Device name or id.", "裝置名稱或 ID。")},
+                "message": {"name": T("Message", "訊息"), "description": T("Message name.", "訊息名稱。")},
+                "signal": {"name": T("Signal", "訊號"), "description": T("Signal name.", "訊號名稱。")},
+                "adopted": {"name": T("Entity", "實體"), "description": T("true = make it an entity, false = drop it.", "true＝變成實體，false＝取消。")},
+                "enabled": {"name": T("Enabled", "啟用"), "description": T("Enabled by default in Home Assistant.", "在 Home Assistant 預設啟用。")},
+                "min_interval": {"name": T("Minimum interval", "最短間隔"), "description": T("Seconds between state writes.", "兩次寫入狀態之間的秒數。")},
+                "tolerance": {"name": T("Tolerance", "容差"), "description": T("Smaller changes are not written.", "比這小的變化不寫入。")},
+                "timeout": {"name": T("Timeout", "逾時"), "description": T("Seconds without the message before unavailable.", "多少秒沒收到就變成無法使用。")},
+                "name": {"name": T("Entity name", "實體名稱"), "description": T("Shown in Home Assistant.", "在 Home Assistant 顯示的名稱。")},
+                "device_class": {"name": T("Device class", "裝置類別"), "description": T("Home Assistant device class, e.g. voltage.", "Home Assistant 的裝置類別，例如 voltage。")},
+                "unit": {"name": T("Unit", "單位"), "description": T("Unit of measurement.", "單位。")},
+                "precision": {"name": T("Precision", "小數位數"), "description": T("Decimals shown.", "顯示的小數位數。")},
+                "note": {"name": T("Note", "備註"), "description": T("Why, in a few words; shown in the activity log.", "為什麼要做，簡短說明；會顯示在活動紀錄。")},
+            },
+        },
+        "decode_frame": {
+            "name": T("Decode a frame", "解碼訊框"),
+            "description": T("What the devices and attached DBC files of an interface make of a frame. Call it with "
+                             "return_response: true.", "用介面上的裝置和附加的 DBC 檔解一筆訊框。要加 return_response: true。"),
+            "fields": {
+                "interface": {"name": T("Interface", "介面"), "description": T("Name (CAN0), interface (can0) or config entry id.", "名稱（CAN0）、介面（can0）或設定項目 ID。")},
+                "frame": {"name": T("Frame", "訊框"), "description": T("cansend notation, e.g. 356#BE14F9FF8C000000.", "cansend 寫法，例如 356#BE14F9FF8C000000。")},
+            },
+        },
+        "test_signal": {
+            "name": T("Test a candidate signal", "試算候選訊號"),
+            "description": T("Read a bit field from the recent frames of one ID (from the interface's buffer): "
+                             "minimum, maximum, number of changes and the last samples, to find where a value sits. "
+                             "Call it with return_response: true.",
+                             "從介面緩衝裡某個 ID 最近的訊框讀出一段位元：最小、最大、變化次數和最近的取樣，用來找數值在哪。"
+                             "要加 return_response: true。"),
+            "fields": {
+                "interface": {"name": T("Interface", "介面"), "description": T("Name (CAN0), interface (can0) or config entry id.", "名稱（CAN0）、介面（can0）或設定項目 ID。")},
+                "can_id": {"name": T("CAN ID", "CAN ID"), "description": T("Hex. 1-3 digits = 11-bit, longer = 29-bit.", "十六進位。1–3 位數＝11-bit，更長＝29-bit。")},
+                "start": {"name": T("Start bit", "起始位元"), "description": T("DBC numbering: Intel = least significant bit, Motorola = most significant bit.", "DBC 編號：Intel 填最低位元，Motorola 填最高位元。")},
+                "length": {"name": T("Length", "長度"), "description": T("Bits.", "位元數。")},
+                "byte_order": {"name": T("Byte order", "位元組序"), "description": T("little (Intel) or big (Motorola).", "little（Intel）或 big（Motorola）。")},
+                "signed": {"name": T("Signed", "有號"), "description": T("Two's complement.", "二補數。")},
+                "factor": {"name": T("Factor", "倍率"), "description": T("Physical = raw x factor + offset.", "實際值＝原始值 × 倍率＋偏移。")},
+                "offset": {"name": T("Offset", "偏移"), "description": T("Physical = raw x factor + offset.", "實際值＝原始值 × 倍率＋偏移。")},
+                "seconds": {"name": T("Last seconds", "最近幾秒"), "description": T("How far back to look.", "往回看多久。")},
+                "limit": {"name": T("Limit", "筆數上限"), "description": T("Frames to read at most.", "最多讀幾筆。")},
+            },
+        },
+        "import_dbc": {
+            "name": T("Import a DBC file", "匯入 DBC 檔"),
+            "description": T("Store DBC text under the configuration directory's woow_can/dbc folder and report what "
+                             "was understood. Attached interfaces name and decode its frames in the panel. Admin only.",
+                             "把 DBC 內容存到設定資料夾的 woow_can/dbc，並回報解析結果。附加到介面後，面板會用它命名和解碼訊框。限管理員。"),
+            "fields": {
+                "name": {"name": T("File name", "檔名"), "description": T("e.g. truck.dbc", "例如 truck.dbc")},
+                "content": {"name": T("Content", "內容"), "description": T("The DBC text.", "DBC 檔的文字內容。")},
+                "attach": {"name": T("Attach to", "附加到"), "description": T("Interfaces (names) to decode with it; * = all.", "要用它解碼的介面（名稱）；*＝全部。")},
+                "note": {"name": T("Note", "備註"), "description": T("Why, in a few words; shown in the activity log.", "為什麼要做，簡短說明；會顯示在活動紀錄。")},
+            },
+        },
+        "list_databases": {
+            "name": T("List DBC files", "列出 DBC 檔"),
+            "description": T("Imported DBC files with message counts, warnings and the interfaces they decode. Call it "
+                             "with return_response: true.", "列出匯入的 DBC 檔、訊息數、警告和附加的介面。要加 return_response: true。"),
+        },
+        "attach_dbc": {
+            "name": T("Attach a DBC file", "附加 DBC 檔"),
+            "description": T("Choose the interfaces a DBC file decodes (an empty list detaches it). Admin only.",
+                             "設定 DBC 檔要解碼哪些介面（空清單＝取消附加）。限管理員。"),
+            "fields": {
+                "name": {"name": T("File name", "檔名"), "description": T("An imported DBC file.", "已匯入的 DBC 檔。")},
+                "interfaces": {"name": T("Interfaces", "介面"), "description": T("Interface names; * = all.", "介面名稱；*＝全部。")},
+                "note": {"name": T("Note", "備註"), "description": T("Why, in a few words; shown in the activity log.", "為什麼要做，簡短說明；會顯示在活動紀錄。")},
+            },
+        },
+        "create_from_dbc": {
+            "name": T("Create a device from a DBC file", "由 DBC 檔建立裝置"),
+            "description": T("Copy messages of an imported DBC file into a new device; their signals become entities. "
+                             "Admin only.", "把匯入的 DBC 檔中的訊息複製成新裝置，訊號會變成實體。限管理員。"),
+            "fields": {
+                "dbc": {"name": T("DBC file", "DBC 檔"), "description": T("An imported DBC file.", "已匯入的 DBC 檔。")},
+                "interface": {"name": T("Interface", "介面"), "description": T("Name (CAN0), interface (can0) or config entry id.", "名稱（CAN0）、介面（can0）或設定項目 ID。")},
+                "name": {"name": T("Name", "名稱"), "description": T("Device name; default: the file name.", "裝置名稱；預設用檔名。")},
+                "messages": {"name": T("Messages", "訊息"), "description": T("Message names to include; empty = all.", "要納入的訊息名稱；空白＝全部。")},
+                "note": {"name": T("Note", "備註"), "description": T("Why, in a few words; shown in the activity log.", "為什麼要做，簡短說明；會顯示在活動紀錄。")},
+            },
+        },
         "clear_monitor": {
             "name": T("Clear the monitor", "清除監看"),
             "description": T("Start the per-ID statistics of an interface over. Admin only.", "把介面的依 ID 統計歸零重來。限管理員。"),
@@ -314,6 +459,8 @@ data = {
         "bad_ids": {"message": T("Invalid ID list: {error}", "ID 清單格式錯誤：{error}")},
         "unknown_periodic": {"message": T("No periodic send {item}. Periodic sends: {items}.", "沒有叫 {item} 的週期發送。現有項目：{items}。")},
         "bad_periodic": {"message": T("Invalid periodic send: {error}", "週期發送設定有誤：{error}")},
+        "unknown_device": {"message": T("No device {device}. Devices: {devices}.", "沒有叫 {device} 的裝置。現有裝置：{devices}。")},
+        "bad_definition": {"message": T("Definition not accepted ({code}): {detail}", "定義有誤（{code}）：{detail}")},
     },
 }
 

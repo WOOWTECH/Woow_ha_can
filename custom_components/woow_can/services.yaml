@@ -315,3 +315,418 @@ clear_monitor:
       description: Why, in a few words; shown in the activity log.
       selector:
         text: null
+list_templates:
+  name: List device templates
+  description: 'Built-in and local device templates (batteries, J1939, NMEA 2000, CANopen) with their parameters,
+    message groups, sources and confidence. Call it with return_response: true.'
+  fields:
+    category:
+      name: Category
+      description: battery, vehicle, marine or industrial.
+      selector:
+        select:
+          options:
+          - battery
+          - vehicle
+          - marine
+          - industrial
+create_from_template:
+  name: Create a device from a template
+  description: Create a device whose signals become entities. Without groups, the message groups whose IDs the interface
+    has already seen are included. Admin only.
+  fields:
+    template:
+      name: Template
+      description: Template id or name.
+      required: true
+      example: bms_lv_0x35x
+      selector:
+        text: null
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    name:
+      name: Name
+      description: 'Device name; default: the template''s.'
+      example: Battery
+      selector:
+        text: null
+    params:
+      name: Parameters
+      description: Template parameters, e.g. node_id or source_address.
+      example:
+        node_id: 5
+      selector:
+        object: null
+    groups:
+      name: Message groups
+      description: Optional groups to include; empty = detect from traffic.
+      example:
+      - sma
+      selector:
+        object: null
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null
+list_devices:
+  name: List devices
+  description: 'Devices with their messages, current values, freshness and entity ids. Call it with return_response:
+    true.'
+  fields:
+    interface:
+      name: Interface
+      description: Only devices on this interface.
+      example: CAN0
+      selector:
+        text: null
+get_device:
+  name: Get a device
+  description: 'One device with its full definition (messages, signals, entity settings) and current values. Call
+    it with return_response: true.'
+  fields:
+    device:
+      name: Device
+      description: Device name or id.
+      required: true
+      example: Battery
+      selector:
+        text: null
+save_device:
+  name: Save a device
+  description: 'Create or replace a device from its JSON definition (get_device shows the shape): interface, messages
+    with can_id or pgn, signals with start, length, byte_order, signed, factor, offset, unit, and an entity block
+    on the signals that become entities. Admin only.'
+  fields:
+    device:
+      name: Device
+      description: The device definition.
+      required: true
+      selector:
+        object: null
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null
+delete_device:
+  name: Delete a device
+  description: Delete a device and its entities. Admin only.
+  fields:
+    device:
+      name: Device
+      description: Device name or id.
+      required: true
+      example: Battery
+      selector:
+        text: null
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null
+set_signal:
+  name: Change a signal's entity
+  description: 'Turn a signal into an entity or back, or change its entity settings: minimum interval between updates,
+    tolerance, timeout, name, enabled. Admin only.'
+  fields:
+    device:
+      name: Device
+      description: Device name or id.
+      required: true
+      example: Battery
+      selector:
+        text: null
+    message:
+      name: Message
+      description: Message name.
+      required: true
+      example: BMS_355_SOC
+      selector:
+        text: null
+    signal:
+      name: Signal
+      description: Signal name.
+      required: true
+      example: SOC
+      selector:
+        text: null
+    adopted:
+      name: Entity
+      description: true = make it an entity, false = drop it.
+      selector:
+        boolean: null
+    enabled:
+      name: Enabled
+      description: Enabled by default in Home Assistant.
+      selector:
+        boolean: null
+    min_interval:
+      name: Minimum interval
+      description: Seconds between state writes.
+      selector:
+        number:
+          min: 0
+          max: 3600
+          step: 0.1
+          unit_of_measurement: s
+          mode: box
+    tolerance:
+      name: Tolerance
+      description: Smaller changes are not written.
+      selector:
+        number:
+          min: 0
+          max: 1000000
+          step: 0.001
+          mode: box
+    timeout:
+      name: Timeout
+      description: Seconds without the message before unavailable.
+      selector:
+        number:
+          min: 0.1
+          max: 86400
+          step: 0.1
+          unit_of_measurement: s
+          mode: box
+    name:
+      name: Entity name
+      description: Shown in Home Assistant.
+      selector:
+        text: null
+    device_class:
+      name: Device class
+      description: Home Assistant device class, e.g. voltage.
+      example: voltage
+      selector:
+        text: null
+    unit:
+      name: Unit
+      description: Unit of measurement.
+      example: V
+      selector:
+        text: null
+    precision:
+      name: Precision
+      description: Decimals shown.
+      selector:
+        number:
+          min: 0
+          max: 12
+          mode: box
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null
+decode_frame:
+  name: Decode a frame
+  description: 'What the devices and attached DBC files of an interface make of a frame. Call it with return_response:
+    true.'
+  fields:
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    frame:
+      name: Frame
+      description: cansend notation, e.g. 356#BE14F9FF8C000000.
+      required: true
+      example: 356#BE14F9FF8C000000
+      selector:
+        text: null
+test_signal:
+  name: Test a candidate signal
+  description: 'Read a bit field from the recent frames of one ID (from the interface''s buffer): minimum, maximum,
+    number of changes and the last samples, to find where a value sits. Call it with return_response: true.'
+  fields:
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    can_id:
+      name: CAN ID
+      description: Hex. 1-3 digits = 11-bit, longer = 29-bit.
+      required: true
+      example: '356'
+      selector:
+        text: null
+    start:
+      name: Start bit
+      description: 'DBC numbering: Intel = least significant bit, Motorola = most significant bit.'
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 511
+          mode: box
+    length:
+      name: Length
+      description: Bits.
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 64
+          mode: box
+    byte_order:
+      name: Byte order
+      description: little (Intel) or big (Motorola).
+      default: little
+      selector:
+        select:
+          options:
+          - little
+          - big
+    signed:
+      name: Signed
+      description: Two's complement.
+      default: false
+      selector:
+        boolean: null
+    factor:
+      name: Factor
+      description: Physical = raw x factor + offset.
+      default: 1
+      selector:
+        number:
+          min: -1000000
+          max: 1000000
+          step: 1.0e-06
+          mode: box
+    offset:
+      name: Offset
+      description: Physical = raw x factor + offset.
+      default: 0
+      selector:
+        number:
+          min: -1000000
+          max: 1000000
+          step: 1.0e-06
+          mode: box
+    seconds:
+      name: Last seconds
+      description: How far back to look.
+      default: 60
+      selector:
+        number:
+          min: 0.1
+          max: 86400
+          step: 0.1
+          unit_of_measurement: s
+          mode: box
+    limit:
+      name: Limit
+      description: Frames to read at most.
+      default: 2000
+      selector:
+        number:
+          min: 1
+          max: 2000
+          mode: box
+import_dbc:
+  name: Import a DBC file
+  description: Store DBC text under the configuration directory's woow_can/dbc folder and report what was understood.
+    Attached interfaces name and decode its frames in the panel. Admin only.
+  fields:
+    name:
+      name: File name
+      description: e.g. truck.dbc
+      required: true
+      example: truck.dbc
+      selector:
+        text: null
+    content:
+      name: Content
+      description: The DBC text.
+      required: true
+      selector:
+        text:
+          multiline: true
+    attach:
+      name: Attach to
+      description: Interfaces (names) to decode with it; * = all.
+      example:
+      - CAN0
+      selector:
+        object: null
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null
+list_databases:
+  name: List DBC files
+  description: 'Imported DBC files with message counts, warnings and the interfaces they decode. Call it with return_response:
+    true.'
+attach_dbc:
+  name: Attach a DBC file
+  description: Choose the interfaces a DBC file decodes (an empty list detaches it). Admin only.
+  fields:
+    name:
+      name: File name
+      description: An imported DBC file.
+      required: true
+      example: truck.dbc
+      selector:
+        text: null
+    interfaces:
+      name: Interfaces
+      description: Interface names; * = all.
+      required: true
+      example:
+      - CAN0
+      selector:
+        object: null
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null
+create_from_dbc:
+  name: Create a device from a DBC file
+  description: Copy messages of an imported DBC file into a new device; their signals become entities. Admin only.
+  fields:
+    dbc:
+      name: DBC file
+      description: An imported DBC file.
+      required: true
+      example: truck.dbc
+      selector:
+        text: null
+    interface:
+      name: Interface
+      description: Name (CAN0), interface (can0) or config entry id.
+      required: true
+      example: CAN0
+      selector:
+        text: null
+    name:
+      name: Name
+      description: 'Device name; default: the file name.'
+      selector:
+        text: null
+    messages:
+      name: Messages
+      description: Message names to include; empty = all.
+      example:
+      - EEC1
+      selector:
+        object: null
+    note:
+      name: Note
+      description: Why, in a few words; shown in the activity log.
+      selector:
+        text: null

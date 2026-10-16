@@ -1,0 +1,302 @@
+{
+ "id": "nmea2000_dc",
+ "version": 1,
+ "name": {
+  "en": "NMEA 2000 battery / DC status (Victron VE.Can)",
+  "zh-Hant": "NMEA 2000 電池／直流狀態（Victron VE.Can）"
+ },
+ "category": "marine",
+ "description": {
+  "en": "Battery monitors, shunts and chargers on NMEA 2000 or Victron VE.Can (Lynx Shunt, BMV via interface, MPPT): voltage, current, power, temperature (PGN 127508) and state of charge, health, time remaining (PGN 127506, fast-packet).",
+  "zh-Hant": "NMEA 2000 或 Victron VE.Can 上的電池監測器、分流器、充電器（Lynx Shunt、經介面的 BMV、MPPT）：電壓、電流、功率、溫度（PGN 127508），以及電量、健康度、剩餘時間（PGN 127506，fast-packet）。"
+ },
+ "bitrate": 250000,
+ "transmits": false,
+ "manufacturer": "NMEA 2000",
+ "model": "PGN 127508 / 127506",
+ "default_name": {
+  "en": "DC battery",
+  "zh-Hant": "直流電池"
+ },
+ "source": [
+  "canboat (Apache-2.0)",
+  "Victron: Data communication with Victron Energy products (whitepaper rev. 31)"
+ ],
+ "license": "Facts from canboat (Apache-2.0) and Victron documents, written by WOOWTECH; MIT",
+ "verified": [
+  "canboat sample frames for 127508 and 127506"
+ ],
+ "confidence": "high",
+ "notes": {
+  "en": "Several devices may use the same instance: set the source address too.",
+  "zh-Hant": "可能有好幾個設備用同一個 instance，建議也填來源位址。"
+ },
+ "params": [
+  {
+   "key": "instance",
+   "default": 0,
+   "description": {
+    "en": "Battery / DC instance (0-252)",
+    "zh-Hant": "電池／直流 instance（0–252）"
+   }
+  },
+  {
+   "key": "source_address",
+   "default": "",
+   "description": {
+    "en": "Source address in hex; empty = any",
+    "zh-Hant": "來源位址（十六進位）；空白＝任何"
+   }
+  }
+ ],
+ "groups": [],
+ "messages": [
+  {
+   "name": "BatteryStatus_127508",
+   "pgn": 127508,
+   "source": "source_address",
+   "length": 8,
+   "cycle_ms": 1500,
+   "filters": [
+    {
+     "byte": 0,
+     "value": "instance"
+    }
+   ],
+   "signals": [
+    {
+     "name": "Instance",
+     "start": 0,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false
+    },
+    {
+     "name": "Voltage",
+     "start": 8,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "factor": 0.01,
+     "unit": "V",
+     "invalid": "n2k",
+     "entity": {
+      "key": "battery.voltage",
+      "name": {
+       "en": "Voltage",
+       "zh-Hant": "電壓"
+      }
+     }
+    },
+    {
+     "name": "Current",
+     "start": 24,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "factor": 0.1,
+     "unit": "A",
+     "invalid": "n2k",
+     "entity": {
+      "key": "battery.current",
+      "name": {
+       "en": "Current",
+       "zh-Hant": "電流"
+      }
+     }
+    },
+    {
+     "name": "Temperature",
+     "start": 40,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.01,
+     "offset": -273.15,
+     "unit": "degC",
+     "invalid": "n2k",
+     "entity": {
+      "key": "battery.temperature",
+      "name": {
+       "en": "Temperature",
+       "zh-Hant": "溫度"
+      },
+      "precision": 1
+     }
+    },
+    {
+     "name": "SID",
+     "start": 56,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false
+    },
+    {
+     "name": "Power",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "W",
+     "derive": {
+      "op": "product",
+      "of": [
+       "Voltage",
+       "Current"
+      ]
+     },
+     "entity": {
+      "key": "battery.power",
+      "name": {
+       "en": "Power",
+       "zh-Hant": "功率"
+      },
+      "precision": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "DcDetailedStatus_127506",
+   "pgn": 127506,
+   "source": "source_address",
+   "length": 11,
+   "cycle_ms": 1500,
+   "transport": "n2k_fast",
+   "filters": [
+    {
+     "byte": 1,
+     "value": "instance"
+    }
+   ],
+   "signals": [
+    {
+     "name": "SID",
+     "start": 0,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false
+    },
+    {
+     "name": "Instance",
+     "start": 8,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false
+    },
+    {
+     "name": "DcType",
+     "start": 16,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "values": {
+      "0": "battery",
+      "1": "alternator",
+      "2": "converter",
+      "3": "solar_cell",
+      "4": "wind_generator"
+     },
+     "entity": {
+      "key": "dc.type",
+      "name": {
+       "en": "DC type",
+       "zh-Hant": "直流類型"
+      },
+      "enabled": false,
+      "category": "diagnostic"
+     }
+    },
+    {
+     "name": "StateOfCharge",
+     "start": 24,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "%",
+     "invalid": "n2k",
+     "entity": {
+      "key": "battery.soc",
+      "name": {
+       "en": "State of charge",
+       "zh-Hant": "電量"
+      },
+      "device_class": "battery",
+      "precision": 0
+     }
+    },
+    {
+     "name": "StateOfHealth",
+     "start": 32,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "%",
+     "invalid": "n2k",
+     "entity": {
+      "key": "battery.soh",
+      "name": {
+       "en": "State of health",
+       "zh-Hant": "健康度"
+      },
+      "precision": 0,
+      "icon": "mdi:heart-pulse"
+     }
+    },
+    {
+     "name": "TimeRemaining",
+     "start": 40,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "min",
+     "invalid": "n2k",
+     "entity": {
+      "key": "battery.time_remaining",
+      "name": {
+       "en": "Time remaining",
+       "zh-Hant": "剩餘時間"
+      },
+      "precision": 0
+     }
+    },
+    {
+     "name": "RippleVoltage",
+     "start": 56,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.001,
+     "unit": "V",
+     "invalid": "n2k",
+     "entity": {
+      "key": "battery.ripple_voltage",
+      "name": {
+       "en": "Ripple voltage",
+       "zh-Hant": "漣波電壓"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "RemainingCapacity",
+     "start": 72,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "Ah",
+     "invalid": "n2k",
+     "entity": {
+      "key": "battery.remaining_capacity",
+      "name": {
+       "en": "Remaining capacity",
+       "zh-Hant": "剩餘容量"
+      },
+      "precision": 0,
+      "enabled": false
+     }
+    }
+   ]
+  }
+ ]
+}

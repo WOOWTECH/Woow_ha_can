@@ -1,0 +1,1890 @@
+{
+ "id": "bms_lv_0x35x",
+ "version": 1,
+ "name": {
+  "en": "Low-voltage battery BMS (Pylontech / SMA / Victron 0x35x)",
+  "zh-Hant": "低壓電池 BMS（Pylontech／SMA／Victron 0x35x）"
+ },
+ "category": "battery",
+ "description": {
+  "en": "Rack and wall batteries that report to their inverter on 0x351-0x35F (Pylontech, BYD LVS, Seplos, REC, JK in Pylon mode, most 48 V rack batteries). Listen between the battery and the inverter: state of charge, voltage, current, power, temperature, charge and discharge limits, alarms.",
+  "zh-Hant": "接在電池和逆變器之間監聽 0x351–0x35F（Pylontech、BYD LVS、Seplos、REC、Pylon 模式的 JK，以及大多數 48 V 機櫃電池）：電量、電壓、電流、功率、溫度、充放電限制和告警。"
+ },
+ "bitrate": 500000,
+ "transmits": false,
+ "manufacturer": "Battery BMS",
+ "model": "CAN 0x35x",
+ "default_name": {
+  "en": "Battery",
+  "zh-Hant": "電池"
+ },
+ "source": [
+  "SMA: Connecting batteries with external BMS to Sunny Island 6.0H-11 (FSS-ConnectingBat-TI-en-10, 2013)",
+  "Pylontech: Low Voltage Battery System CANBUS Protocol V1.3 (2019-03-01)",
+  "REC BMS manuals for Victron and SMA",
+  "dfch/BydCanProtocol (MIT): BYD LVS to Victron capture"
+ ],
+ "license": "Facts from vendor documents and public captures, written by WOOWTECH; MIT",
+ "verified": [
+  "Pylontech US3000 x10 -> Sofar ME3000SP capture (setfirelabs, 2021)",
+  "BYD LVS -> Victron Venus OS 3.00 capture (dfch/BydCanProtocol)"
+ ],
+ "confidence": "high",
+ "notes": {
+  "en": "Current is positive while charging (0x356). The inverter's 0x305 counts the other way round. Victron's extensions (0x370 and up) are community knowledge: Victron's BMS protocol is under NDA.",
+  "zh-Hant": "電流正值＝充電（0x356）；逆變器的 0x305 正負號相反。Victron 的延伸訊框（0x370 之後）是社群整理的資料，Victron 的 BMS 協定受保密協議限制。"
+ },
+ "params": [],
+ "groups": [
+  {
+   "id": "pylon",
+   "name": {
+    "en": "Pylontech alarms and requests (0x359, 0x35C)",
+    "zh-Hant": "Pylontech 告警與請求旗標（0x359、0x35C）"
+   }
+  },
+  {
+   "id": "sma",
+   "name": {
+    "en": "SMA alarms, warnings and battery data (0x35A, 0x35F)",
+    "zh-Hant": "SMA 告警、警告與電池資料（0x35A、0x35F）"
+   }
+  },
+  {
+   "id": "victron",
+   "name": {
+    "en": "Victron / BYD extensions: cell extremes, energy, capacity (0x373, 0x378, 0x379)",
+    "zh-Hant": "Victron／BYD 延伸：電芯極值、累計電量、容量（0x373、0x378、0x379）"
+   }
+  },
+  {
+   "id": "inverter",
+   "name": {
+    "en": "Inverter replies (0x305, 0x306; SMA Sunny Island values)",
+    "zh-Hant": "逆變器回覆（0x305、0x306；SMA Sunny Island 的數值）"
+   }
+  }
+ ],
+ "messages": [
+  {
+   "name": "BMS_351_Limits",
+   "can_id": "351",
+   "length": 8,
+   "cycle_ms": 1000,
+   "signals": [
+    {
+     "name": "ChargeVoltageLimit",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.1,
+     "unit": "V",
+     "invalid": "sma",
+     "entity": {
+      "key": "battery.charge_voltage_limit",
+      "name": {
+       "en": "Charge voltage limit",
+       "zh-Hant": "充電電壓上限"
+      }
+     }
+    },
+    {
+     "name": "ChargeCurrentLimit",
+     "start": 16,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "factor": 0.1,
+     "unit": "A",
+     "invalid": "sma",
+     "entity": {
+      "key": "battery.charge_current_limit",
+      "name": {
+       "en": "Charge current limit",
+       "zh-Hant": "充電電流上限"
+      }
+     }
+    },
+    {
+     "name": "DischargeCurrentLimit",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "factor": 0.1,
+     "unit": "A",
+     "invalid": "sma",
+     "entity": {
+      "key": "battery.discharge_current_limit",
+      "name": {
+       "en": "Discharge current limit",
+       "zh-Hant": "放電電流上限"
+      }
+     }
+    },
+    {
+     "name": "DischargeVoltageLimit",
+     "start": 48,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.1,
+     "unit": "V",
+     "invalid": "sma",
+     "entity": {
+      "key": "battery.discharge_voltage_limit",
+      "name": {
+       "en": "Discharge voltage limit",
+       "zh-Hant": "放電電壓下限"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "BMS_355_SOC",
+   "can_id": "355",
+   "length": 8,
+   "cycle_ms": 1000,
+   "signals": [
+    {
+     "name": "SOC",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "%",
+     "invalid": "sma",
+     "entity": {
+      "key": "battery.soc",
+      "name": {
+       "en": "State of charge",
+       "zh-Hant": "電量"
+      },
+      "device_class": "battery",
+      "precision": 0
+     }
+    },
+    {
+     "name": "SOH",
+     "start": 16,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "%",
+     "invalid": "sma",
+     "entity": {
+      "key": "battery.soh",
+      "name": {
+       "en": "State of health",
+       "zh-Hant": "健康度"
+      },
+      "precision": 0,
+      "icon": "mdi:heart-pulse"
+     }
+    },
+    {
+     "name": "SOC_HiRes",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.01,
+     "unit": "%",
+     "invalid": "sma",
+     "entity": {
+      "key": "battery.soc_fine",
+      "name": {
+       "en": "State of charge (0.01 %)",
+       "zh-Hant": "電量（0.01%）"
+      },
+      "device_class": "battery",
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "BMS_356_Measurements",
+   "can_id": "356",
+   "length": 8,
+   "cycle_ms": 1000,
+   "signals": [
+    {
+     "name": "BatteryVoltage",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "factor": 0.01,
+     "unit": "V",
+     "invalid": "sma",
+     "entity": {
+      "key": "battery.voltage",
+      "name": {
+       "en": "Voltage",
+       "zh-Hant": "電壓"
+      }
+     }
+    },
+    {
+     "name": "BatteryCurrent",
+     "start": 16,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "factor": 0.1,
+     "unit": "A",
+     "invalid": "sma",
+     "comment": "positive while charging",
+     "entity": {
+      "key": "battery.current",
+      "name": {
+       "en": "Current (positive = charging)",
+       "zh-Hant": "電流（正＝充電）"
+      }
+     }
+    },
+    {
+     "name": "BatteryTemperature",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "factor": 0.1,
+     "unit": "degC",
+     "invalid": "sma",
+     "entity": {
+      "key": "battery.temperature",
+      "name": {
+       "en": "Temperature",
+       "zh-Hant": "溫度"
+      }
+     }
+    },
+    {
+     "name": "BatteryPower",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "W",
+     "derive": {
+      "op": "product",
+      "of": [
+       "BatteryVoltage",
+       "BatteryCurrent"
+      ]
+     },
+     "entity": {
+      "key": "battery.power",
+      "name": {
+       "en": "Power (positive = charging)",
+       "zh-Hant": "功率（正＝充電）"
+      },
+      "precision": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "PYLON_359_Alarms",
+   "can_id": "359",
+   "length": 7,
+   "cycle_ms": 1000,
+   "group": "pylon",
+   "signals": [
+    {
+     "name": "P_CellOverVoltage",
+     "start": 1,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.p_cellovervoltage",
+      "name": {
+       "en": "Protection: cell over-voltage",
+       "zh-Hant": "保護：電芯過壓"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "P_CellUnderVoltage",
+     "start": 2,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.p_cellundervoltage",
+      "name": {
+       "en": "Protection: cell under-voltage",
+       "zh-Hant": "保護：電芯欠壓"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "P_CellOverTemperature",
+     "start": 3,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.p_cellovertemperature",
+      "name": {
+       "en": "Protection: cell over-temperature",
+       "zh-Hant": "保護：電芯過溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "P_CellUnderTemperature",
+     "start": 4,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.p_cellundertemperature",
+      "name": {
+       "en": "Protection: cell under-temperature",
+       "zh-Hant": "保護：電芯低溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "P_DischargeOverCurrent",
+     "start": 7,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.p_dischargeovercurrent",
+      "name": {
+       "en": "Protection: discharge over-current",
+       "zh-Hant": "保護：放電過流"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "P_ChargeOverCurrent",
+     "start": 8,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.p_chargeovercurrent",
+      "name": {
+       "en": "Protection: charge over-current",
+       "zh-Hant": "保護：充電過流"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "P_SystemError",
+     "start": 11,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.p_systemerror",
+      "name": {
+       "en": "Protection: system error",
+       "zh-Hant": "保護：系統錯誤"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "A_CellHighVoltage",
+     "start": 17,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.a_cellhighvoltage",
+      "name": {
+       "en": "Alarm: cell high voltage",
+       "zh-Hant": "告警：電芯高壓"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "A_CellLowVoltage",
+     "start": 18,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.a_celllowvoltage",
+      "name": {
+       "en": "Alarm: cell low voltage",
+       "zh-Hant": "告警：電芯低壓"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "A_CellHighTemperature",
+     "start": 19,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.a_cellhightemperature",
+      "name": {
+       "en": "Alarm: cell high temperature",
+       "zh-Hant": "告警：電芯高溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "A_CellLowTemperature",
+     "start": 20,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.a_celllowtemperature",
+      "name": {
+       "en": "Alarm: cell low temperature",
+       "zh-Hant": "告警：電芯低溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "A_DischargeHighCurrent",
+     "start": 23,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.a_dischargehighcurrent",
+      "name": {
+       "en": "Alarm: high discharge current",
+       "zh-Hant": "告警：放電電流大"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "A_ChargeHighCurrent",
+     "start": 24,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.a_chargehighcurrent",
+      "name": {
+       "en": "Alarm: high charge current",
+       "zh-Hant": "告警：充電電流大"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "A_InternalCommFail",
+     "start": 27,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.a_internalcommfail",
+      "name": {
+       "en": "Alarm: internal communication failure",
+       "zh-Hant": "告警：內部通訊失敗"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": false
+     }
+    },
+    {
+     "name": "ModuleCount",
+     "start": 32,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.module_count",
+      "name": {
+       "en": "Modules",
+       "zh-Hant": "模組數"
+      },
+      "icon": "mdi:battery-high",
+      "state_class": "measurement",
+      "precision": 0
+     }
+    },
+    {
+     "name": "ProtectionActive",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "derive": {
+      "op": "any",
+      "of": [
+       "P_CellOverVoltage",
+       "P_CellUnderVoltage",
+       "P_CellOverTemperature",
+       "P_CellUnderTemperature",
+       "P_DischargeOverCurrent",
+       "P_ChargeOverCurrent",
+       "P_SystemError"
+      ]
+     },
+     "entity": {
+      "key": "battery.protection",
+      "name": {
+       "en": "Protection active",
+       "zh-Hant": "保護動作中"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    },
+    {
+     "name": "AlarmActive",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "derive": {
+      "op": "any",
+      "of": [
+       "A_CellHighVoltage",
+       "A_CellLowVoltage",
+       "A_CellHighTemperature",
+       "A_CellLowTemperature",
+       "A_DischargeHighCurrent",
+       "A_ChargeHighCurrent",
+       "A_InternalCommFail"
+      ]
+     },
+     "entity": {
+      "key": "battery.alarm",
+      "name": {
+       "en": "Alarm active",
+       "zh-Hant": "告警中"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "PYLON_35C_Requests",
+   "can_id": "35C",
+   "length": 2,
+   "cycle_ms": 1000,
+   "group": "pylon",
+   "signals": [
+    {
+     "name": "ChargeEnable",
+     "start": 7,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.charge_enabled",
+      "name": {
+       "en": "Charging allowed",
+       "zh-Hant": "允許充電"
+      },
+      "platform": "binary_sensor",
+      "icon": "mdi:battery-charging"
+     }
+    },
+    {
+     "name": "DischargeEnable",
+     "start": 6,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.discharge_enabled",
+      "name": {
+       "en": "Discharging allowed",
+       "zh-Hant": "允許放電"
+      },
+      "platform": "binary_sensor",
+      "icon": "mdi:battery-arrow-down"
+     }
+    },
+    {
+     "name": "ForceChargeRequest1",
+     "start": 5,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.force_charge",
+      "name": {
+       "en": "Force charge request",
+       "zh-Hant": "強制充電請求"
+      },
+      "platform": "binary_sensor",
+      "icon": "mdi:battery-alert"
+     }
+    },
+    {
+     "name": "ForceChargeRequest2",
+     "start": 4,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.force_charge_2",
+      "name": {
+       "en": "Force charge request II",
+       "zh-Hant": "強制充電請求 II"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    },
+    {
+     "name": "FullChargeRequest",
+     "start": 3,
+     "length": 1,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.full_charge_request",
+      "name": {
+       "en": "Full charge request",
+       "zh-Hant": "要求充滿"
+      },
+      "platform": "binary_sensor",
+      "icon": "mdi:battery-sync"
+     }
+    }
+   ]
+  },
+  {
+   "name": "BMS_35E_Manufacturer",
+   "can_id": "35E",
+   "length": 8,
+   "cycle_ms": 1000,
+   "signals": [
+    {
+     "name": "Manufacturer",
+     "start": 0,
+     "length": 64,
+     "byte_order": "little",
+     "signed": false,
+     "kind": "ascii",
+     "entity": {
+      "key": "battery.manufacturer",
+      "name": {
+       "en": "Manufacturer",
+       "zh-Hant": "製造商"
+      },
+      "icon": "mdi:factory",
+      "category": "diagnostic"
+     }
+    }
+   ]
+  },
+  {
+   "name": "SMA_35A_AlarmsWarnings",
+   "can_id": "35A",
+   "length": 8,
+   "cycle_ms": 1000,
+   "group": "sma",
+   "comment": "two bits per item: 01 raised, 10 cleared; AA = all clear",
+   "signals": [
+    {
+     "name": "AL_General",
+     "start": 0,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_general",
+      "name": {
+       "en": "SMA alarm: general",
+       "zh-Hant": "SMA 告警：一般"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_HighVoltage",
+     "start": 2,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_highvoltage",
+      "name": {
+       "en": "SMA alarm: battery high voltage",
+       "zh-Hant": "SMA 告警：電池高壓"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_LowVoltage",
+     "start": 4,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_lowvoltage",
+      "name": {
+       "en": "SMA alarm: battery low voltage",
+       "zh-Hant": "SMA 告警：電池低壓"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_HighTemperature",
+     "start": 6,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_hightemperature",
+      "name": {
+       "en": "SMA alarm: high temperature",
+       "zh-Hant": "SMA 告警：高溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_LowTemperature",
+     "start": 8,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_lowtemperature",
+      "name": {
+       "en": "SMA alarm: low temperature",
+       "zh-Hant": "SMA 告警：低溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_HighTemperatureCharge",
+     "start": 10,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_hightemperaturecharge",
+      "name": {
+       "en": "SMA alarm: high temperature charging",
+       "zh-Hant": "SMA 告警：充電高溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_LowTemperatureCharge",
+     "start": 12,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_lowtemperaturecharge",
+      "name": {
+       "en": "SMA alarm: low temperature charging",
+       "zh-Hant": "SMA 告警：充電低溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_HighDischargeCurrent",
+     "start": 14,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_highdischargecurrent",
+      "name": {
+       "en": "SMA alarm: high discharge current",
+       "zh-Hant": "SMA 告警：放電電流大"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_HighChargeCurrent",
+     "start": 16,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_highchargecurrent",
+      "name": {
+       "en": "SMA alarm: high charge current",
+       "zh-Hant": "SMA 告警：充電電流大"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_Contactor",
+     "start": 18,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_contactor",
+      "name": {
+       "en": "SMA alarm: contactor",
+       "zh-Hant": "SMA 告警：接觸器"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_ShortCircuit",
+     "start": 20,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_shortcircuit",
+      "name": {
+       "en": "SMA alarm: short circuit",
+       "zh-Hant": "SMA 告警：短路"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_BmsInternal",
+     "start": 22,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_bmsinternal",
+      "name": {
+       "en": "SMA alarm: BMS internal",
+       "zh-Hant": "SMA 告警：BMS 內部"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AL_CellImbalance",
+     "start": 24,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_al_cellimbalance",
+      "name": {
+       "en": "SMA alarm: cell imbalance",
+       "zh-Hant": "SMA 告警：電芯不平衡"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_General",
+     "start": 32,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_general",
+      "name": {
+       "en": "SMA warning: general",
+       "zh-Hant": "SMA 警告：一般"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_HighVoltage",
+     "start": 34,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_highvoltage",
+      "name": {
+       "en": "SMA warning: battery high voltage",
+       "zh-Hant": "SMA 警告：電池高壓"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_LowVoltage",
+     "start": 36,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_lowvoltage",
+      "name": {
+       "en": "SMA warning: battery low voltage",
+       "zh-Hant": "SMA 警告：電池低壓"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_HighTemperature",
+     "start": 38,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_hightemperature",
+      "name": {
+       "en": "SMA warning: high temperature",
+       "zh-Hant": "SMA 警告：高溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_LowTemperature",
+     "start": 40,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_lowtemperature",
+      "name": {
+       "en": "SMA warning: low temperature",
+       "zh-Hant": "SMA 警告：低溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_HighTemperatureCharge",
+     "start": 42,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_hightemperaturecharge",
+      "name": {
+       "en": "SMA warning: high temperature charging",
+       "zh-Hant": "SMA 警告：充電高溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_LowTemperatureCharge",
+     "start": 44,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_lowtemperaturecharge",
+      "name": {
+       "en": "SMA warning: low temperature charging",
+       "zh-Hant": "SMA 警告：充電低溫"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_HighDischargeCurrent",
+     "start": 46,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_highdischargecurrent",
+      "name": {
+       "en": "SMA warning: high discharge current",
+       "zh-Hant": "SMA 警告：放電電流大"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_HighChargeCurrent",
+     "start": 48,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_highchargecurrent",
+      "name": {
+       "en": "SMA warning: high charge current",
+       "zh-Hant": "SMA 警告：充電電流大"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_Contactor",
+     "start": 50,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_contactor",
+      "name": {
+       "en": "SMA warning: contactor",
+       "zh-Hant": "SMA 警告：接觸器"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_ShortCircuit",
+     "start": 52,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_shortcircuit",
+      "name": {
+       "en": "SMA warning: short circuit",
+       "zh-Hant": "SMA 警告：短路"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_BmsInternal",
+     "start": 54,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_bmsinternal",
+      "name": {
+       "en": "SMA warning: BMS internal",
+       "zh-Hant": "SMA 警告：BMS 內部"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "WA_CellImbalance",
+     "start": 56,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": [
+      0,
+      3
+     ],
+     "entity": {
+      "key": "battery.sma_wa_cellimbalance",
+      "name": {
+       "en": "SMA warning: cell imbalance",
+       "zh-Hant": "SMA 警告：電芯不平衡"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "on": [
+       1
+      ],
+      "off": [
+       2
+      ],
+      "enabled": false
+     }
+    },
+    {
+     "name": "AlarmActive",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "derive": {
+      "op": "any",
+      "of": [
+       "AL_General",
+       "AL_HighVoltage",
+       "AL_LowVoltage",
+       "AL_HighTemperature",
+       "AL_LowTemperature",
+       "AL_HighTemperatureCharge",
+       "AL_LowTemperatureCharge",
+       "AL_HighDischargeCurrent",
+       "AL_HighChargeCurrent",
+       "AL_Contactor",
+       "AL_ShortCircuit",
+       "AL_BmsInternal",
+       "AL_CellImbalance"
+      ]
+     },
+     "entity": {
+      "key": "battery.sma_alarm",
+      "name": {
+       "en": "SMA alarm active",
+       "zh-Hant": "SMA 告警中"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    },
+    {
+     "name": "WarningActive",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "derive": {
+      "op": "any",
+      "of": [
+       "WA_General",
+       "WA_HighVoltage",
+       "WA_LowVoltage",
+       "WA_HighTemperature",
+       "WA_LowTemperature",
+       "WA_HighTemperatureCharge",
+       "WA_LowTemperatureCharge",
+       "WA_HighDischargeCurrent",
+       "WA_HighChargeCurrent",
+       "WA_Contactor",
+       "WA_ShortCircuit",
+       "WA_BmsInternal",
+       "WA_CellImbalance"
+      ]
+     },
+     "entity": {
+      "key": "battery.sma_warning",
+      "name": {
+       "en": "SMA warning active",
+       "zh-Hant": "SMA 警告中"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "SMA_35F_BatteryData",
+   "can_id": "35F",
+   "length": 8,
+   "cycle_ms": 1000,
+   "group": "sma",
+   "signals": [
+    {
+     "name": "BatteryType",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.type_code",
+      "name": {
+       "en": "Battery type code",
+       "zh-Hant": "電池類型代碼"
+      },
+      "format": "hex",
+      "enabled": false,
+      "category": "diagnostic"
+     }
+    },
+    {
+     "name": "BmsVersion",
+     "start": 16,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.bms_version",
+      "name": {
+       "en": "BMS version",
+       "zh-Hant": "BMS 版本"
+      },
+      "format": "hex",
+      "enabled": false,
+      "category": "diagnostic"
+     }
+    },
+    {
+     "name": "Capacity",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "Ah",
+     "entity": {
+      "key": "battery.capacity",
+      "name": {
+       "en": "Capacity",
+       "zh-Hant": "容量"
+      },
+      "precision": 0,
+      "icon": "mdi:battery-high"
+     }
+    },
+    {
+     "name": "ManufacturerId",
+     "start": 48,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "battery.manufacturer_id",
+      "name": {
+       "en": "Manufacturer ID",
+       "zh-Hant": "製造商代碼"
+      },
+      "format": "hex",
+      "enabled": false,
+      "category": "diagnostic"
+     }
+    }
+   ]
+  },
+  {
+   "name": "VICTRON_373_CellExtremes",
+   "can_id": "373",
+   "length": 8,
+   "cycle_ms": 1000,
+   "group": "victron",
+   "comment": "community knowledge (BYD capture, JK sources)",
+   "signals": [
+    {
+     "name": "MinCellVoltage",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.001,
+     "unit": "V",
+     "entity": {
+      "key": "battery.cell_voltage_min",
+      "name": {
+       "en": "Lowest cell voltage",
+       "zh-Hant": "最低電芯電壓"
+      }
+     }
+    },
+    {
+     "name": "MaxCellVoltage",
+     "start": 16,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.001,
+     "unit": "V",
+     "entity": {
+      "key": "battery.cell_voltage_max",
+      "name": {
+       "en": "Highest cell voltage",
+       "zh-Hant": "最高電芯電壓"
+      }
+     }
+    },
+    {
+     "name": "MinCellTemperature",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "offset": -273,
+     "unit": "degC",
+     "entity": {
+      "key": "battery.cell_temperature_min",
+      "name": {
+       "en": "Lowest cell temperature",
+       "zh-Hant": "最低電芯溫度"
+      }
+     }
+    },
+    {
+     "name": "MaxCellTemperature",
+     "start": 48,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "offset": -273,
+     "unit": "degC",
+     "entity": {
+      "key": "battery.cell_temperature_max",
+      "name": {
+       "en": "Highest cell temperature",
+       "zh-Hant": "最高電芯溫度"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "BMS_378_Energy",
+   "can_id": "378",
+   "length": 8,
+   "cycle_ms": 1000,
+   "group": "victron",
+   "signals": [
+    {
+     "name": "ChargedEnergy",
+     "start": 0,
+     "length": 32,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.1,
+     "unit": "kWh",
+     "entity": {
+      "key": "battery.energy_charged",
+      "name": {
+       "en": "Energy charged",
+       "zh-Hant": "累計充電量"
+      }
+     }
+    },
+    {
+     "name": "DischargedEnergy",
+     "start": 32,
+     "length": 32,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.1,
+     "unit": "kWh",
+     "entity": {
+      "key": "battery.energy_discharged",
+      "name": {
+       "en": "Energy discharged",
+       "zh-Hant": "累計放電量"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "VICTRON_379_Capacity",
+   "can_id": "379",
+   "length": 8,
+   "cycle_ms": 1000,
+   "group": "victron",
+   "signals": [
+    {
+     "name": "InstalledCapacity",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "Ah",
+     "entity": {
+      "key": "battery.installed_capacity",
+      "name": {
+       "en": "Installed capacity",
+       "zh-Hant": "安裝容量"
+      },
+      "precision": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "INVERTER_305",
+   "can_id": "305",
+   "length": 8,
+   "cycle_ms": 1000,
+   "group": "inverter",
+   "comment": "sent by the inverter; current negative while charging (SMA)",
+   "signals": [
+    {
+     "name": "BatteryVoltage",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.1,
+     "unit": "V",
+     "invalid": "sma",
+     "entity": {
+      "key": "inverter.battery_voltage",
+      "name": {
+       "en": "Inverter: battery voltage",
+       "zh-Hant": "逆變器：電池電壓"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "BatteryCurrent",
+     "start": 16,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "factor": 0.1,
+     "unit": "A",
+     "invalid": "sma",
+     "entity": {
+      "key": "inverter.battery_current",
+      "name": {
+       "en": "Inverter: battery current (negative = charging)",
+       "zh-Hant": "逆變器：電池電流（負＝充電）"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "BatteryTemperature",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "factor": 0.1,
+     "unit": "degC",
+     "invalid": "sma",
+     "entity": {
+      "key": "inverter.battery_temperature",
+      "name": {
+       "en": "Inverter: battery temperature",
+       "zh-Hant": "逆變器：電池溫度"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "SOC",
+     "start": 48,
+     "length": 16,
+     "byte_order": "little",
+     "signed": true,
+     "factor": 0.1,
+     "unit": "%",
+     "invalid": "sma",
+     "entity": {
+      "key": "inverter.soc",
+      "name": {
+       "en": "Inverter: state of charge",
+       "zh-Hant": "逆變器：電量"
+      },
+      "device_class": "battery",
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "INVERTER_306",
+   "can_id": "306",
+   "length": 8,
+   "cycle_ms": 1000,
+   "group": "inverter",
+   "signals": [
+    {
+     "name": "SOH",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "%",
+     "invalid": "sma"
+    },
+    {
+     "name": "ChargingProcedure",
+     "start": 16,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false
+    },
+    {
+     "name": "OperatingState",
+     "start": 24,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "values": {
+      "0": "none",
+      "1": "operating",
+      "3": "warning",
+      "4": "failure"
+     },
+     "entity": {
+      "key": "inverter.state",
+      "name": {
+       "en": "Inverter state",
+       "zh-Hant": "逆變器狀態"
+      },
+      "icon": "mdi:solar-power"
+     }
+    },
+    {
+     "name": "ActiveError",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "inverter.error",
+      "name": {
+       "en": "Inverter error code",
+       "zh-Hant": "逆變器錯誤碼"
+      },
+      "format": "hex",
+      "enabled": false
+     }
+    },
+    {
+     "name": "ChargeVoltageSetpoint",
+     "start": 48,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.1,
+     "unit": "V",
+     "invalid": "sma",
+     "entity": {
+      "key": "inverter.charge_voltage_setpoint",
+      "name": {
+       "en": "Inverter: charge voltage setpoint",
+       "zh-Hant": "逆變器：充電電壓設定"
+      },
+      "enabled": false
+     }
+    }
+   ]
+  }
+ ]
+}

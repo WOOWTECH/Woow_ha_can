@@ -177,6 +177,7 @@ def test_trace_buffer_pages_and_logs():
         ifname, ts, raw, data, flags = parse_log_line(line)
         assert log_line(ifname, ts, raw, data, flags).strip() == line
     assert len(buf.long) == 1
+    assert buf.recent_ids() == {0x104, 0x105, 0x106, 0x107, 0x200} and buf.recent_ids(2) == {0x107, 0x200}
 
 
 def test_log_parsing():

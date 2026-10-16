@@ -24,8 +24,10 @@ from .const import DOMAIN
 
 API_NAME = "WOOW CAN"
 READ_ONLY = {"describe", "list_interfaces", "get_monitor", "get_trace", "get_activity", "list_periodic",
-             "list_captures"}
-REPLACES = {"save_periodic", "control_periodic", "clear_monitor"}  # overwrite, stop or remove what is there
+             "list_captures", "list_templates", "list_devices", "get_device", "decode_frame", "test_signal",
+             "list_databases"}
+REPLACES = {"save_periodic", "control_periodic", "clear_monitor", "save_device", "delete_device", "set_signal",
+            "attach_dbc"}  # overwrite, stop or remove what is there
 IDEMPOTENT = READ_ONLY | REPLACES
 # Hints in the service texts that are for direct service calls; a tool always asks for the response.
 _SERVICE_HINTS = (" Call it with return_response: true.", " Add return_response: true to get the result.")
@@ -33,7 +35,9 @@ PROMPT = (
     "WOOW CAN watches and uses CAN / CAN FD buses (SocketCAN interfaces such as can0) through Home "
     "Assistant. Call describe first: it explains the frame notation and the workflow and lists the "
     "interfaces with their health. get_monitor shows one row per CAN ID; get_trace shows frames in time "
-    "order. Sending needs an admin and an interface that is not listen-only; never send to vehicles or "
+    "order. Devices turn signals into entities: list_templates and create_from_template for known "
+    "equipment (batteries, J1939 engines, NMEA 2000, CANopen), test_signal and save_device for unknown "
+    "frames. Sending needs an admin and an interface that is not listen-only; never send to vehicles or "
     "machinery unless the user asked for that exact frame. Give every change a short note in the language "
     "the user speaks with you: people review the changes in the activity log of the WOOW CAN panel."
 )

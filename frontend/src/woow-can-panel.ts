@@ -10,11 +10,15 @@ import {
   Activity,
   Api,
   CaptureFile,
+  DatabaseSummary,
+  DeviceView,
   FeedEvent,
   HomeAssistant,
   InterfaceInfo,
   OfflineInfo,
   Periodic,
+  TemplateSummary,
+  Values,
   define,
   errorText,
   storageGet,
@@ -24,12 +28,14 @@ import { Key, Translate, makeTranslate } from "./i18n";
 import { shared } from "./styles";
 import "./views/activity";
 import "./views/capture";
+import { MAX_CHARTS } from "./views/devices";
 import "./views/monitor";
 import "./views/overview";
 import "./views/send";
 
-type Tab = "overview" | "monitor" | "send" | "capture" | "activity";
-const TABS: Tab[] = ["overview", "monitor", "send", "capture", "activity"];
+type Tab = "overview" | "monitor" | "devices" | "send" | "capture" | "activity";
+const TABS: Tab[] = ["overview", "monitor", "devices", "send", "capture", "activity"];
+const SIGNAL_POINTS = 300; // samples kept per numeric signal for the charts
 const ACTIVITY_KEEP = 500;
 const HISTORY_POINTS = 300; // load samples kept per interface (one a second)
 const MENU = "M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z";
@@ -48,6 +54,12 @@ export class WoowCanPanel extends LitElement {
   @state() private history: Record<string, number[]> = {};
   @state() private source = storageGet<string>("woow_can.source", "");
   @state() private draft: { frame: string; entryId: string; n: number } | null = null;
+  @state() private devices: Record<string, DeviceView> = {};
+  @state() private values: Values = {};
+  @state() private signalHistory: Record<string, [number, number][]> = {};
+  @state() private charts: string[] = storageGet<string[]>("woow_can.charts", []);
+  @state() private templates: TemplateSummary[] = [];
+  @state() private databases: DatabaseSummary[] = [];
   @state() private confirmed = new Set<string>();
   @state() private loaded = false;
   @state() private error = "";
@@ -152,6 +164,10 @@ export class WoowCanPanel extends LitElement {
       this.offline = snap.offline;
       this.periodic = Object.fromEntries(snap.periodic.map((p) => [p.id, p]));
       this.activity = snap.activity;
+      this.devices = Object.fromEntries((snap.devices ?? []).map((d) => [d.id, d]));
+      this.values = snap.values ?? {};
+      this.templates = snap.templates ?? [];
+      this.databases = snap.databases ?? [];
       if (!this.source || !(this.source in this.interfaces || snap.offline.some((o) => o.id === this.source))) {
         this.source = this.interfaceList[0]?.id ?? "";
       }
@@ -205,6 +221,31 @@ export class WoowCanPanel extends LitElement {
       case "captures":
         void this.loadFiles();
         break;
+      case "devices": {
+        const devices = { ...this.devices };
+        for (const d of event.devices) devices[d.id] = d;
+        for (const id of event.removed) delete devices[id];
+        this.devices = devices;
+        break;
+      }
+      case "values": {
+        const values = { ...this.values };
+        const history = { ...this.signalHistory };
+        for (const [deviceId, changed] of Object.entries(event.values)) {
+          values[deviceId] = { ...(values[deviceId] ?? {}), ...changed };
+          for (const [key, v] of Object.entries(changed)) {
+            if (typeof v !== "number") continue;
+            const hkey = `${deviceId}|${key}`;
+            history[hkey] = [...(history[hkey] ?? []), [event.t, v] as [number, number]].slice(-SIGNAL_POINTS);
+          }
+        }
+        this.values = values;
+        this.signalHistory = history;
+        break;
+      }
+      case "databases":
+        this.databases = event.databases;
+        break;
       case "offline":
         this.offline = event.offline;
         if (this.source.startsWith("file:") && !event.offline.some((o) => o.id === this.source)) {
@@ -248,6 +289,26 @@ export class WoowCanPanel extends LitElement {
             this.setTab("send");
           }}
         ></woow-can-monitor>`;
+      case "devices":
+        return html`<woow-can-devices
+          .interfaces=${interfaces}
+          .devices=${Object.values(this.devices).sort((a, b) => a.name.localeCompare(b.name))}
+          .values=${this.values}
+          .history=${this.signalHistory}
+          .charts=${this.charts}
+          .templates=${this.templates}
+          .databases=${this.databases}
+          .preferredInterface=${this.source}
+          .t=${this.t}
+          .api=${this.api}
+          @toggle-chart=${(e: CustomEvent<string>) => {
+            const charts = this.charts.includes(e.detail)
+              ? this.charts.filter((c) => c !== e.detail)
+              : [...this.charts, e.detail].slice(-MAX_CHARTS);
+            this.charts = charts;
+            storageSet("woow_can.charts", charts);
+          }}
+        ></woow-can-devices>`;
       case "send":
         return html`<woow-can-send
           .interfaces=${interfaces}
@@ -293,6 +354,7 @@ export class WoowCanPanel extends LitElement {
   render() {
     const t = this.t;
     const counts: Partial<Record<Tab, number>> = {
+      devices: Object.keys(this.devices).length,
       send: Object.values(this.periodic).filter((p) => p.running).length,
       capture: this.files.length,
     };

@@ -13,6 +13,7 @@ import { repeat } from "lit/directives/repeat.js";
 
 import {
   Api,
+  Decoded,
   F_ERR,
   F_LOCAL,
   F_OWN,
@@ -34,6 +35,7 @@ import {
 } from "../api";
 import { Translate, ago, clock, duration } from "../i18n";
 import { bytesCss, shared } from "../styles";
+import { formatValue } from "./devices";
 
 const FADE_MS = 2000;
 const NOTCH_WINDOW_MS = 2000;
@@ -98,8 +100,12 @@ export class WoowCanMonitor extends LitElement {
   @state() private overflow = 0;
   @state() private tick = 0;
   @state() private narrow = false;
+  @state() private decoded: Decoded[] | null = null;
 
   private rows = new Map<number, RowState>();
+  private names = new Map<number, string>();
+  private decodedAt = 0;
+  private decodedKey = -1;
   private order: number[] = [];
   private orderDirty = true;
   private pins = new Set<number>();
@@ -201,6 +207,21 @@ export class WoowCanMonitor extends LitElement {
         margin-left: 4px;
         font-weight: 400;
       }
+      td.id .name {
+        font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif);
+        font-weight: 400;
+        font-size: 0.8em;
+        color: var(--secondary-text-color);
+      }
+      .decoded {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 14px;
+        margin: 4px 0;
+      }
+      .decoded .sig {
+        font-variant-numeric: tabular-nums;
+      }
       .tag.muted-tag {
         background: var(--secondary-background-color, #eee);
         color: var(--secondary-text-color);
@@ -264,7 +285,10 @@ export class WoowCanMonitor extends LitElement {
     document.addEventListener("visibilitychange", this.onVisibility);
     this.resize.observe(this);
     this.timer = window.setInterval(() => {
-      if (!this.paused && !document.hidden) this.tick++;
+      if (!this.paused && !document.hidden) {
+        this.tick++;
+        if (this.expanded >= 0 && performance.now() - this.decodedAt > 1000) void this.refreshDecode();
+      }
     }, 200);
     this.loadPins();
     if (this.source && !this.paused) void this.start();
@@ -354,6 +378,8 @@ export class WoowCanMonitor extends LitElement {
       this.rows.clear();
       this.orderDirty = true;
     }
+    if (batch.full) this.names.clear();
+    for (const [key, name] of Object.entries(batch.names ?? {})) this.names.set(Number(key) % TX_KEY, name);
     for (const row of batch.rows ?? []) this.applyRow(row, now, !!batch.full);
     if (batch.frames !== undefined) this.frames = batch.frames;
     if (batch.overflow !== undefined) this.overflow = batch.overflow;
@@ -467,6 +493,30 @@ export class WoowCanMonitor extends LitElement {
     }
   }
 
+  private async refreshDecode(): Promise<void> {
+    const row = this.rows.get(this.expanded);
+    this.decodedAt = performance.now();
+    if (!row || (row.flags & F_ERR)) {
+      this.decoded = null;
+      return;
+    }
+    if (this.decodedKey !== row.key) this.decoded = null;
+    this.decodedKey = row.key;
+    try {
+      const res = await this.api.decode(this.source, row.raw, row.hex);
+      if (this.expanded === row.key) this.decoded = res.decoded;
+    } catch {
+      this.decoded = null;
+    }
+  }
+
+  private toggleRow(key: number): void {
+    this.expanded = this.expanded === key ? -1 : key;
+    this.decoded = null;
+    this.decodedAt = 0;
+    if (this.expanded >= 0) void this.refreshDecode();
+  }
+
   // ---- row actions -------------------------------------------------------------------------
   private togglePin(key: number): void {
     if (this.pins.has(key)) this.pins.delete(key);
@@ -545,8 +595,17 @@ export class WoowCanMonitor extends LitElement {
     const iface = this.iface;
     const filter = iface ? new IdFilter(iface.settings.event_filter) : null;
     const firesEvents = !!(iface && iface.settings.event_filter.trim() && filter && !filter.error && filter.matches(row.raw));
+    const decoded = this.decodedKey === row.key ? this.decoded : null;
     return html`
         <div class="mono">${frameText(row.raw, row.flags, row.hex)}</div>
+        ${decoded === null
+          ? nothing
+          : decoded.length === 0
+            ? html`<div class="muted">${t("no_definition")}</div>`
+            : decoded.map((d) => html`<div class="decoded">
+                <span class="muted">${d.source} · ${d.message}</span>
+                ${d.signals.map((sg) => html`<span class="sig">${sg.name} <b>${formatValue(sg.value, sg.unit)}</b></span>`)}
+              </div>`)}
         <div class="muted">
           ${row.period
             ? html`${t("detail_period", {
@@ -615,9 +674,11 @@ export class WoowCanMonitor extends LitElement {
               return html`<tr class="${inactive ? "inactive" : ""} ${row.born && now - row.born < FADE_MS ? "new" : ""}">
                   <td><button class="pin ${this.pins.has(row.key) ? "on" : ""}" title=${t("row_pin")}
                     @click=${() => this.togglePin(row.key)}>${this.pins.has(row.key) ? "★" : "☆"}</button></td>
-                  <td class="id ${age > 4 ? "stale" : ""}" @click=${() => (this.expanded = this.expanded === row.key ? -1 : row.key)}>
+                  <td class="id ${age > 4 ? "stale" : ""}" @click=${() => this.toggleRow(row.key)}>
                     ${idHex(row.raw)}${tx ? html`<span class="tag">${t("dir_tx")}</span>` : nothing}${local
                       ? html`<span class="tag muted-tag">${t("dir_local")}</span>`
+                      : nothing}${this.names.has(row.key % TX_KEY)
+                      ? html`<div class="name">${this.names.get(row.key % TX_KEY)}</div>`
                       : nothing}
                   </td>
                   <td class="num">${row.bytes.length}</td>
@@ -648,13 +709,14 @@ export class WoowCanMonitor extends LitElement {
           const inactive = age > (row.period ? 5 * row.period + 0.5 : 1.75);
           const tx = row.key >= TX_KEY;
           return html`<div class="mrow ${inactive ? "inactive" : ""} ${row.born && now - row.born < FADE_MS ? "new" : ""}">
-            <div class="mhead" @click=${() => (this.expanded = this.expanded === row.key ? -1 : row.key)}>
+            <div class="mhead" @click=${() => this.toggleRow(row.key)}>
               <button class="pin ${this.pins.has(row.key) ? "on" : ""}" @click=${(e: Event) => {
                 e.stopPropagation();
                 this.togglePin(row.key);
               }}>${this.pins.has(row.key) ? "★" : "☆"}</button>
               <span class="id ${age > 4 ? "stale" : ""}">${idHex(row.raw)}</span>
               ${tx ? html`<span class="tag">${t("dir_tx")}</span>` : nothing}
+              ${this.names.has(row.key % TX_KEY) ? html`<span class="muted">${this.names.get(row.key % TX_KEY)}</span>` : nothing}
               <span class="grow"></span>
               <span class="muted">${row.period ? `${(1 / row.period).toFixed(1)} Hz · ` : ""}${duration(Math.max(0, age))}</span>
             </div>

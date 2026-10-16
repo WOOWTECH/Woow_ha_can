@@ -78,6 +78,7 @@ class Viewer:
         self.seq = 0
         self.acked = 0
         self.cleared = False
+        self.named: set[int] = set()  # keys whose message name was sent
 
     @property
     def unacked(self) -> int:

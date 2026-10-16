@@ -20,6 +20,25 @@ For RS485 / RS232 use [WOOW Serial](https://github.com/WOOWTECH/Woow_ha_serial).
 
 The panel gets a batch every 250 ms and must acknowledge each one before the next is sent, so on a busy bus a phone just updates less often instead of being disconnected by Home Assistant.
 
+## Devices, templates and DBC files
+
+The Devices tab decodes frames into values; chosen signals become Home Assistant entities (sensors and binary sensors):
+
+- **Built-in templates** (all of them only listen; each names its sources, license, what it was checked against and its confidence):
+
+| Template | For | Main entities |
+|---|---|---|
+| Low-voltage battery BMS (0x35x) | Pylontech, BYD LVS, Seplos, REC, JK in Pylon mode and most 48 V batteries, with SMA, Victron, Deye, Sofar or GoodWe inverters | State of charge and health, voltage, current, power, temperature, charge / discharge limits, protections and alarms, charge / discharge allowed; SMA alarms and Victron cell extremes / energy are added when their frames are seen |
+| J1939 engine and vehicle | Trucks, buses, generator sets, farm and marine diesel engines | Engine speed, torque, vehicle speed, coolant / oil / fuel temperatures, oil pressure and level, fuel rate and economy, throttle, battery voltage, engine hours |
+| J1939 active faults (DM1) | The same, including multi-frame BAM | Four lamps, number of faults, fault codes (SPN / FMI) |
+| NMEA 2000 battery / DC status | Victron VE.Can (Lynx Shunt, MPPT), boats, campers | Voltage, current, power, temperature, state of charge and health, time remaining |
+| CANopen node monitor | Any CiA 301 device | Online / offline (off when the heartbeat stops), NMT state, emergency error code |
+
+- **DBC files**: attached to an interface they name and decode the monitor's rows; make a device from some of their messages. The reader covers what matters (messages, signals, Intel / Motorola, signed, float, value tables, comments, cycle times, multiplexing, J1939 PGNs) and lists what it skipped.
+- **Each entity is throttled on its own**: numbers at most once a second, changes under half a resolution step are not written; silent for longer than max(3 cycles, 5 s) the entity turns unavailable. Tune it in the panel or with `set_signal`.
+- Every numeric signal can be charted live.
+- Decoding needs no external package; it is tested against the verified real and example frames from the research, and compared with cantools in CI.
+
 ## Interface settings
 
 - Finds the host's CAN interfaces (MCP2515, MCP2518FD, …).
@@ -51,6 +70,11 @@ The panel gets a batch every 250 ms and must acknowledge each one before the nex
 | `save_periodic`, `control_periodic` | Add or change a periodic send; start, stop, delete |
 | `capture` | Start or stop a recording |
 | `clear_monitor` | Start an interface's monitor statistics over |
+| `list_templates`, `create_from_template` | Templates; make a device from one (groups detected from traffic unless given) |
+| `list_devices`, `get_device`, `save_device`, `delete_device` | Devices with current values and full definitions; create or change one from JSON; delete |
+| `set_signal` | Make a signal an entity or drop it; minimum interval, tolerance, timeout |
+| `decode_frame`, `test_signal` | Decode one frame with the interface's definitions; try a bit field on recent frames (where is the value?) |
+| `import_dbc`, `list_databases`, `attach_dbc`, `create_from_dbc` | Import a DBC file, attach it, make a device from it |
 
 - Interfaces can be named by config entry id, name (CAN0) or interface (can0).
 - Sending and changing settings need an admin user; reading does not. Every send and change goes to the activity log; `note` says why.

@@ -191,6 +191,7 @@ class CanHub:
         self.load = BusLoad()
         self.errors = ErrorLog()
         self.recording: Recording | None = None
+        self.frame_hook: Callable[[str, float, int, bytes, int], None] | None = None  # devices (admin)
         self.started = time.time()
         self.last_rx: tuple[float, int, bytes, int] | None = None  # time, raw id, data, flags
         self.last_tx: tuple[CanFrame, datetime] | None = None
@@ -357,6 +358,8 @@ class CanHub:
             self.recording.add(ts, raw, data, flags)
         if flags & F_OWN:
             return
+        if self.frame_hook is not None:
+            self.frame_hook(self.entry.entry_id, ts, raw, data, flags)
         self.last_rx = (ts, raw, data, flags)
         self._throttled("rx")
         if self.events.wants(raw) and self.events.allow():

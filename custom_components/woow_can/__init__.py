@@ -30,7 +30,8 @@ from .hub import CanHub
 from .services import SEND_SCHEMA  # noqa: F401  (imported by the tests)
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.EVENT, Platform.SENSOR, Platform.TEXT]
+PLATFORMS = [Platform.EVENT, Platform.SENSOR, Platform.TEXT]  # each interface
+HUB_PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]  # entities of the devices (admin entry)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
@@ -77,6 +78,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await admin.async_start()
         entry.runtime_data = admin
         hass.data[DOMAIN]["admin"] = admin
+        await hass.config_entries.async_forward_entry_setups(entry, HUB_PLATFORMS)
         return True
     port = entry.data[CONF_PORT]
     if entry.data.get(CONF_VIRTUAL) and not await hass.async_add_executor_job(link_exists, port):
@@ -101,6 +103,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.data.get(CONF_KIND, KIND_CAN) == KIND_HUB:
+        if not await hass.config_entries.async_unload_platforms(entry, HUB_PLATFORMS):
+            return False
         await entry.runtime_data.async_stop()
         hass.data[DOMAIN].pop("admin", None)
         return True

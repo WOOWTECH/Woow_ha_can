@@ -34,6 +34,20 @@
    `<config>/woow_can/captures`.
 8. `get_activity` — what changed, by whom, why. Give every send and change a short `note`.
 
+## Devices: signals as entities
+
+- Known equipment: `list_templates`, then `create_from_template` {template, interface, name, params}.
+  Templates: `bms_lv_0x35x` (48 V batteries on 0x351-0x35F; groups pylon / sma / victron / inverter are
+  detected from traffic when not given), `j1939_engine_vehicle` and `j1939_dm1` (params source_address, hex,
+  empty = any), `nmea2000_dc` (instance, source_address), `canopen_node_monitor` (node_id, heartbeat_ms).
+- `list_devices` / `get_device` show current values, whether each message is still arriving, entity ids.
+- DBC files: `import_dbc` {name, content, attach}, `attach_dbc`, `create_from_dbc` {dbc, interface, messages}.
+- Unknown frames: find the ID with get_monitor (data_changes while a person operates the equipment), try a
+  field with `test_signal` {interface, can_id, start, length, byte_order, signed, factor, offset}, then
+  `save_device` with a definition (the shape is in `describe` -> device_definition and in `get_device`).
+- `set_signal` {device, message, signal, adopted, min_interval, tolerance, timeout} adopts a signal as an
+  entity or tunes it. `decode_frame` {interface, frame} shows what the definitions make of one frame.
+
 Interfaces can be named by config entry id, name (`CAN0`) or interface (`can0`).
 
 ## Notation

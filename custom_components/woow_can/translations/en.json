@@ -345,6 +345,282 @@
         }
       }
     },
+    "list_templates": {
+      "name": "List device templates",
+      "description": "Built-in and local device templates (batteries, J1939, NMEA 2000, CANopen) with their parameters, message groups, sources and confidence. Call it with return_response: true.",
+      "fields": {
+        "category": {
+          "name": "Category",
+          "description": "battery, vehicle, marine or industrial."
+        }
+      }
+    },
+    "create_from_template": {
+      "name": "Create a device from a template",
+      "description": "Create a device whose signals become entities. Without groups, the message groups whose IDs the interface has already seen are included. Admin only.",
+      "fields": {
+        "template": {
+          "name": "Template",
+          "description": "Template id or name."
+        },
+        "interface": {
+          "name": "Interface",
+          "description": "Name (CAN0), interface (can0) or config entry id."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Device name; default: the template's."
+        },
+        "params": {
+          "name": "Parameters",
+          "description": "Template parameters, e.g. node_id or source_address."
+        },
+        "groups": {
+          "name": "Message groups",
+          "description": "Optional groups to include; empty = detect from traffic."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Why, in a few words; shown in the activity log."
+        }
+      }
+    },
+    "list_devices": {
+      "name": "List devices",
+      "description": "Devices with their messages, current values, freshness and entity ids. Call it with return_response: true.",
+      "fields": {
+        "interface": {
+          "name": "Interface",
+          "description": "Only devices on this interface."
+        }
+      }
+    },
+    "get_device": {
+      "name": "Get a device",
+      "description": "One device with its full definition (messages, signals, entity settings) and current values. Call it with return_response: true.",
+      "fields": {
+        "device": {
+          "name": "Device",
+          "description": "Device name or id."
+        }
+      }
+    },
+    "save_device": {
+      "name": "Save a device",
+      "description": "Create or replace a device from its JSON definition (get_device shows the shape): interface, messages with can_id or pgn, signals with start, length, byte_order, signed, factor, offset, unit, and an entity block on the signals that become entities. Admin only.",
+      "fields": {
+        "device": {
+          "name": "Device",
+          "description": "The device definition."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Why, in a few words; shown in the activity log."
+        }
+      }
+    },
+    "delete_device": {
+      "name": "Delete a device",
+      "description": "Delete a device and its entities. Admin only.",
+      "fields": {
+        "device": {
+          "name": "Device",
+          "description": "Device name or id."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Why, in a few words; shown in the activity log."
+        }
+      }
+    },
+    "set_signal": {
+      "name": "Change a signal's entity",
+      "description": "Turn a signal into an entity or back, or change its entity settings: minimum interval between updates, tolerance, timeout, name, enabled. Admin only.",
+      "fields": {
+        "device": {
+          "name": "Device",
+          "description": "Device name or id."
+        },
+        "message": {
+          "name": "Message",
+          "description": "Message name."
+        },
+        "signal": {
+          "name": "Signal",
+          "description": "Signal name."
+        },
+        "adopted": {
+          "name": "Entity",
+          "description": "true = make it an entity, false = drop it."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Enabled by default in Home Assistant."
+        },
+        "min_interval": {
+          "name": "Minimum interval",
+          "description": "Seconds between state writes."
+        },
+        "tolerance": {
+          "name": "Tolerance",
+          "description": "Smaller changes are not written."
+        },
+        "timeout": {
+          "name": "Timeout",
+          "description": "Seconds without the message before unavailable."
+        },
+        "name": {
+          "name": "Entity name",
+          "description": "Shown in Home Assistant."
+        },
+        "device_class": {
+          "name": "Device class",
+          "description": "Home Assistant device class, e.g. voltage."
+        },
+        "unit": {
+          "name": "Unit",
+          "description": "Unit of measurement."
+        },
+        "precision": {
+          "name": "Precision",
+          "description": "Decimals shown."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Why, in a few words; shown in the activity log."
+        }
+      }
+    },
+    "decode_frame": {
+      "name": "Decode a frame",
+      "description": "What the devices and attached DBC files of an interface make of a frame. Call it with return_response: true.",
+      "fields": {
+        "interface": {
+          "name": "Interface",
+          "description": "Name (CAN0), interface (can0) or config entry id."
+        },
+        "frame": {
+          "name": "Frame",
+          "description": "cansend notation, e.g. 356#BE14F9FF8C000000."
+        }
+      }
+    },
+    "test_signal": {
+      "name": "Test a candidate signal",
+      "description": "Read a bit field from the recent frames of one ID (from the interface's buffer): minimum, maximum, number of changes and the last samples, to find where a value sits. Call it with return_response: true.",
+      "fields": {
+        "interface": {
+          "name": "Interface",
+          "description": "Name (CAN0), interface (can0) or config entry id."
+        },
+        "can_id": {
+          "name": "CAN ID",
+          "description": "Hex. 1-3 digits = 11-bit, longer = 29-bit."
+        },
+        "start": {
+          "name": "Start bit",
+          "description": "DBC numbering: Intel = least significant bit, Motorola = most significant bit."
+        },
+        "length": {
+          "name": "Length",
+          "description": "Bits."
+        },
+        "byte_order": {
+          "name": "Byte order",
+          "description": "little (Intel) or big (Motorola)."
+        },
+        "signed": {
+          "name": "Signed",
+          "description": "Two's complement."
+        },
+        "factor": {
+          "name": "Factor",
+          "description": "Physical = raw x factor + offset."
+        },
+        "offset": {
+          "name": "Offset",
+          "description": "Physical = raw x factor + offset."
+        },
+        "seconds": {
+          "name": "Last seconds",
+          "description": "How far back to look."
+        },
+        "limit": {
+          "name": "Limit",
+          "description": "Frames to read at most."
+        }
+      }
+    },
+    "import_dbc": {
+      "name": "Import a DBC file",
+      "description": "Store DBC text under the configuration directory's woow_can/dbc folder and report what was understood. Attached interfaces name and decode its frames in the panel. Admin only.",
+      "fields": {
+        "name": {
+          "name": "File name",
+          "description": "e.g. truck.dbc"
+        },
+        "content": {
+          "name": "Content",
+          "description": "The DBC text."
+        },
+        "attach": {
+          "name": "Attach to",
+          "description": "Interfaces (names) to decode with it; * = all."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Why, in a few words; shown in the activity log."
+        }
+      }
+    },
+    "list_databases": {
+      "name": "List DBC files",
+      "description": "Imported DBC files with message counts, warnings and the interfaces they decode. Call it with return_response: true."
+    },
+    "attach_dbc": {
+      "name": "Attach a DBC file",
+      "description": "Choose the interfaces a DBC file decodes (an empty list detaches it). Admin only.",
+      "fields": {
+        "name": {
+          "name": "File name",
+          "description": "An imported DBC file."
+        },
+        "interfaces": {
+          "name": "Interfaces",
+          "description": "Interface names; * = all."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Why, in a few words; shown in the activity log."
+        }
+      }
+    },
+    "create_from_dbc": {
+      "name": "Create a device from a DBC file",
+      "description": "Copy messages of an imported DBC file into a new device; their signals become entities. Admin only.",
+      "fields": {
+        "dbc": {
+          "name": "DBC file",
+          "description": "An imported DBC file."
+        },
+        "interface": {
+          "name": "Interface",
+          "description": "Name (CAN0), interface (can0) or config entry id."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Device name; default: the file name."
+        },
+        "messages": {
+          "name": "Messages",
+          "description": "Message names to include; empty = all."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Why, in a few words; shown in the activity log."
+        }
+      }
+    },
     "clear_monitor": {
       "name": "Clear the monitor",
       "description": "Start the per-ID statistics of an interface over. Admin only.",
@@ -405,6 +681,12 @@
     },
     "bad_periodic": {
       "message": "Invalid periodic send: {error}"
+    },
+    "unknown_device": {
+      "message": "No device {device}. Devices: {devices}."
+    },
+    "bad_definition": {
+      "message": "Definition not accepted ({code}): {detail}"
     }
   }
 }

@@ -1,0 +1,169 @@
+{
+ "id": "j1939_dm1",
+ "version": 1,
+ "name": {
+  "en": "J1939 active faults (DM1)",
+  "zh-Hant": "J1939 作用中故障碼（DM1）"
+ },
+ "category": "vehicle",
+ "description": {
+  "en": "The warning lamps and active diagnostic trouble codes (SPN, FMI, occurrences) every J1939 ECU broadcasts, including multi-frame DM1 (transport protocol BAM).",
+  "zh-Hant": "每個 J1939 ECU 都會廣播的警示燈和作用中故障碼（SPN、FMI、次數），包含多封包的 DM1（BAM 傳輸）。"
+ },
+ "bitrate": 250000,
+ "transmits": false,
+ "manufacturer": "J1939 ECU",
+ "model": "DM1",
+ "default_name": {
+  "en": "Engine faults",
+  "zh-Hant": "引擎故障"
+ },
+ "source": [
+  "SAE J1939-73 summary in public documents",
+  "Scania: Fault codes DM1, issue 6",
+  "Linux kernel J1939 documentation",
+  "FMS-Standard v02.00 (BAM example)"
+ ],
+ "license": "Facts from public documents, written by WOOWTECH; MIT",
+ "verified": [
+  "DM1 single frame and BAM transfer examples from the FMS standard"
+ ],
+ "confidence": "high",
+ "notes": {
+  "en": "Fault codes are SPN / FMI numbers; their texts are in the maker's documentation.",
+  "zh-Hant": "故障碼是 SPN／FMI 編號，文字說明要查原廠文件。"
+ },
+ "params": [
+  {
+   "key": "source_address",
+   "default": "",
+   "description": {
+    "en": "Source address of the ECU in hex; empty = any (faults of several ECUs mix)",
+    "zh-Hant": "ECU 的來源位址（十六進位）；空白＝任何（多顆 ECU 的故障會混在一起）"
+   }
+  }
+ ],
+ "groups": [],
+ "messages": [
+  {
+   "name": "DM1",
+   "pgn": 65226,
+   "source": "source_address",
+   "length": 8,
+   "cycle_ms": 1000,
+   "transport": "j1939_tp",
+   "decoder": "j1939_dm1",
+   "signals": [
+    {
+     "name": "MalfunctionLamp",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "decoder_field": "malfunction_lamp",
+     "entity": {
+      "key": "faults.malfunction_lamp",
+      "name": {
+       "en": "Malfunction lamp (MIL)",
+       "zh-Hant": "故障指示燈（MIL）"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    },
+    {
+     "name": "RedStopLamp",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "decoder_field": "red_stop_lamp",
+     "entity": {
+      "key": "faults.red_stop_lamp",
+      "name": {
+       "en": "Red stop lamp",
+       "zh-Hant": "紅色停車燈"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    },
+    {
+     "name": "AmberWarningLamp",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "decoder_field": "amber_warning_lamp",
+     "entity": {
+      "key": "faults.amber_warning_lamp",
+      "name": {
+       "en": "Amber warning lamp",
+       "zh-Hant": "琥珀色警告燈"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    },
+    {
+     "name": "ProtectLamp",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "decoder_field": "protect_lamp",
+     "entity": {
+      "key": "faults.protect_lamp",
+      "name": {
+       "en": "Protect lamp",
+       "zh-Hant": "保護燈"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    },
+    {
+     "name": "ActiveFaults",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "decoder_field": "dtc_count",
+     "entity": {
+      "key": "faults.count",
+      "name": {
+       "en": "Active faults",
+       "zh-Hant": "作用中故障數"
+      },
+      "precision": 0,
+      "state_class": "measurement",
+      "icon": "mdi:alert-circle"
+     }
+    },
+    {
+     "name": "FaultCodes",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "decoder_field": "dtc_text",
+     "entity": {
+      "key": "faults.codes",
+      "name": {
+       "en": "Fault codes",
+       "zh-Hant": "故障碼"
+      },
+      "icon": "mdi:format-list-bulleted",
+      "attributes": [
+       "dtcs"
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -20,6 +20,25 @@ RS485／RS232 請改用 [WOOW Serial](https://github.com/WOOWTECH/Woow_ha_serial
 
 面板每 250 ms 收一批彙整，而且要回確認才會收下一批，所以匯流排很忙時，手機只會更新得慢一點，不會被 Home Assistant 斷線。
 
+## 裝置、範本與 DBC
+
+「裝置」分頁把訊框解成數值，選定的訊號會變成 Home Assistant 實體（感測器、二元感測器）：
+
+- **內建範本**（都只監聽、不發送，每個都附出處、授權、驗證依據和可信度）：
+
+| 範本 | 適用 | 主要實體 |
+|---|---|---|
+| 低壓電池 BMS（0x35x） | Pylontech、BYD LVS、Seplos、REC、JK（Pylon 模式）等 48 V 電池，接 SMA、Victron、Deye、Sofar、GoodWe 逆變器 | 電量、健康度、電壓、電流、功率、溫度、充放電限制、保護／告警、允許充放電；SMA 告警、Victron 電芯極值與累計電量依實際流量自動加入 |
+| J1939 引擎與車輛 | 卡車、巴士、發電機組、農機、船用柴油引擎 | 轉速、扭矩、車速、冷卻液／機油／燃油溫度、機油壓力與油位、油耗、油門、電瓶電壓、運轉時數 |
+| J1939 作用中故障碼（DM1） | 同上，含多封包 BAM | 四個警示燈、故障數、故障碼（SPN／FMI） |
+| NMEA 2000 電池／直流狀態 | Victron VE.Can（Lynx Shunt、MPPT）、船、露營車 | 電壓、電流、功率、溫度、電量、健康度、剩餘時間 |
+| CANopen 節點監看 | 任何 CiA 301 設備 | 在線／離線（heartbeat 停止就變離線）、NMT 狀態、緊急錯誤碼 |
+
+- **DBC 檔**：匯入後附加到介面，監看會用它命名和解碼訊框；從裡面挑訊息就能建立裝置。只讀需要的部分（訊息、訊號、Intel／Motorola、有號、浮點、數值表、註解、週期、多工、J1939 PGN），看不懂的行會列在匯入報告。
+- **每個實體各自節流**：數值最少 1 秒更新一次、變化小於半個解析度不寫；訊息超過「3 倍週期與 5 秒取大者」沒收到就變成無法使用。可以在面板或用 `set_signal` 調整。
+- 每個數值訊號都可以按「曲線」看即時變化。
+- 解碼不依賴外部套件；正確性用研究時驗證過的實機與範例訊框測試，並在 CI 跟 cantools 交叉比對。
+
 ## 介面設定
 
 - 自動找出主機上的 CAN 介面，例如 MCP2515、MCP2518FD。
@@ -51,6 +70,11 @@ RS485／RS232 請改用 [WOOW Serial](https://github.com/WOOWTECH/Woow_ha_serial
 | `save_periodic`、`control_periodic` | 新增或修改週期發送；開始、停止、刪除 |
 | `capture` | 開始或停止錄製 |
 | `clear_monitor` | 把介面的監看統計歸零 |
+| `list_templates`、`create_from_template` | 列出範本；由範本建立裝置（不指定群組時依流量判斷） |
+| `list_devices`、`get_device`、`save_device`、`delete_device` | 裝置的目前數值、完整定義；用 JSON 建立或修改裝置；刪除 |
+| `set_signal` | 把訊號變成實體或取消，或調整最短間隔、容差、逾時 |
+| `decode_frame`、`test_signal` | 用介面上的定義解一筆訊框；拿最近的訊框試算一段位元（找數值在哪） |
+| `import_dbc`、`list_databases`、`attach_dbc`、`create_from_dbc` | 匯入 DBC、附加到介面、從 DBC 建立裝置 |
 
 - 介面可以用設定項目 ID、名稱（CAN0）或介面名稱（can0）指定。
 - 發送和改設定限管理員；查詢不限。所有發送與變更都會記進活動紀錄，`note` 欄位可以寫原因。

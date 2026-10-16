@@ -1,0 +1,177 @@
+{
+ "id": "canopen_node_monitor",
+ "version": 1,
+ "name": {
+  "en": "CANopen node monitor (heartbeat, emergency)",
+  "zh-Hant": "CANopen 節點監看（heartbeat、緊急訊息）"
+ },
+ "category": "industrial",
+ "description": {
+  "en": "Any CANopen device (CiA 301): online / offline from its heartbeat, its NMT state, and emergency messages with their error code. The node must produce a heartbeat (object 0x1017); many leave the factory with it off.",
+  "zh-Hant": "任何 CANopen 設備（CiA 301）：由 heartbeat 判斷在線／離線、NMT 狀態，以及緊急訊息與錯誤碼。設備要有開 heartbeat（物件 0x1017），很多設備出廠是關的。"
+ },
+ "bitrate": null,
+ "transmits": false,
+ "manufacturer": "CANopen",
+ "model": "CiA 301 node",
+ "default_name": {
+  "en": "CANopen node",
+  "zh-Hant": "CANopen 節點"
+ },
+ "source": [
+  "CiA 301 v4.02 (facts only)",
+  "CANopenNode (Apache-2.0)",
+  "python canopen (MIT)",
+  "ICP DAS and maxon EPOS4 manuals (emergency examples)"
+ ],
+ "license": "Facts from public documents, written by WOOWTECH; MIT",
+ "verified": [
+  "Heartbeat and emergency frames from the ICP DAS and maxon manuals"
+ ],
+ "confidence": "high",
+ "notes": {
+  "en": "An error code of 0000 clears the emergency.",
+  "zh-Hant": "錯誤碼 0000 代表解除緊急狀態。"
+ },
+ "params": [
+  {
+   "key": "node_id",
+   "default": 1,
+   "description": {
+    "en": "Node ID (1-127)",
+    "zh-Hant": "節點編號（1–127）"
+   }
+  },
+  {
+   "key": "heartbeat_ms",
+   "default": 1000,
+   "description": {
+    "en": "The node's heartbeat period in ms (object 0x1017)",
+    "zh-Hant": "節點的 heartbeat 週期，毫秒（物件 0x1017）"
+   }
+  }
+ ],
+ "groups": [],
+ "messages": [
+  {
+   "name": "Heartbeat",
+   "can_id": "0x700 + node_id",
+   "extended": false,
+   "length": 1,
+   "cycle_ms": "heartbeat_ms",
+   "signals": [
+    {
+     "name": "State",
+     "start": 0,
+     "length": 7,
+     "byte_order": "little",
+     "signed": false,
+     "values": {
+      "0": "boot_up",
+      "4": "stopped",
+      "5": "operational",
+      "127": "pre_operational"
+     },
+     "entity": {
+      "key": "node.state",
+      "name": {
+       "en": "NMT state",
+       "zh-Hant": "NMT 狀態"
+      },
+      "icon": "mdi:state-machine"
+     }
+    },
+    {
+     "name": "Online",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "derive": {
+      "op": "present"
+     },
+     "entity": {
+      "key": "node.online",
+      "name": {
+       "en": "Online",
+       "zh-Hant": "在線"
+      },
+      "platform": "binary_sensor",
+      "device_class": "connectivity",
+      "on_timeout": "off"
+     }
+    }
+   ]
+  },
+  {
+   "name": "Emergency",
+   "can_id": "0x80 + node_id",
+   "extended": false,
+   "length": 8,
+   "signals": [
+    {
+     "name": "ErrorCode",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "node.error_code",
+      "name": {
+       "en": "Emergency error code",
+       "zh-Hant": "緊急錯誤碼"
+      },
+      "format": "hex",
+      "icon": "mdi:alert"
+     }
+    },
+    {
+     "name": "ErrorRegister",
+     "start": 16,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "entity": {
+      "key": "node.error_register",
+      "name": {
+       "en": "Error register",
+       "zh-Hant": "錯誤暫存器"
+      },
+      "format": "hex",
+      "enabled": false
+     }
+    },
+    {
+     "name": "ManufacturerError",
+     "start": 24,
+     "length": 40,
+     "byte_order": "little",
+     "signed": false
+    },
+    {
+     "name": "InError",
+     "start": 0,
+     "length": 0,
+     "byte_order": "little",
+     "signed": false,
+     "derive": {
+      "op": "nonzero",
+      "of": [
+       "ErrorCode"
+      ]
+     },
+     "entity": {
+      "key": "node.error",
+      "name": {
+       "en": "Error active",
+       "zh-Hant": "錯誤中"
+      },
+      "platform": "binary_sensor",
+      "device_class": "problem",
+      "enabled": true
+     }
+    }
+   ]
+  }
+ ]
+}

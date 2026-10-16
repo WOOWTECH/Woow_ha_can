@@ -112,6 +112,7 @@ export type MonitorRow = [number, number, number, string, number, number, number
 export interface MonitorBatch {
   seq: number;
   t: number;
+  names?: Record<string, string>;
   rows?: MonitorRow[];
   overflow?: number;
   frames?: number;
@@ -134,11 +135,123 @@ export interface TracePage {
   scanned: number;
 }
 
+export interface SignalStatus {
+  name: string;
+  value: unknown;
+  unit: string;
+  adopted: boolean;
+  entity_id: string | null;
+  platform: "sensor" | "binary_sensor";
+  disabled: boolean;
+}
+
+export interface MessageStatus {
+  name: string;
+  id: string;
+  seen_s_ago: number | null;
+  fresh: boolean | null;
+  signals: SignalStatus[];
+}
+
+export interface EntitySettings {
+  name?: string | Record<string, string>;
+  key?: string;
+  platform?: string;
+  enabled?: boolean;
+  min_interval?: number;
+  tolerance?: number;
+  timeout?: number;
+  [key: string]: unknown;
+}
+
+export interface SignalDef {
+  name: string;
+  start: number;
+  length: number;
+  byte_order: "little" | "big";
+  signed: boolean;
+  factor?: number;
+  offset?: number;
+  unit?: string;
+  entity?: EntitySettings;
+  comment?: string;
+  [key: string]: unknown;
+}
+
+export interface MessageDef {
+  name: string;
+  can_id?: string;
+  pgn?: number;
+  signals: SignalDef[];
+  [key: string]: unknown;
+}
+
+export interface DeviceView {
+  id: string;
+  name: string;
+  interface: string;
+  template: string | null;
+  source: string;
+  manufacturer: string;
+  model: string;
+  params: Record<string, unknown>;
+  groups: string[];
+  status: MessageStatus[];
+  extra: Record<string, unknown>;
+  definition?: { messages: MessageDef[]; [key: string]: unknown };
+}
+
+export interface TemplateSummary {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  notes: string;
+  default_name: string;
+  bitrate: number | null;
+  transmits: boolean;
+  source: string[];
+  license: string;
+  verified: string[];
+  confidence: string;
+  manufacturer: string;
+  model: string;
+  params: { key: string; default: unknown; description: string }[];
+  groups: { id: string; name: string }[];
+  messages: { name: string; id: string; group: string | null; entities: number }[];
+  origin: string;
+}
+
+export interface DatabaseSummary {
+  name: string;
+  messages: number;
+  signals: number;
+  nodes: string[];
+  skipped_statements: number;
+  warnings: string[];
+  warning_count: number;
+  attached: string[];
+  imported: number;
+  message_names: string[];
+}
+
+export interface Decoded {
+  source: string;
+  message: string;
+  signals: { name: string; value: unknown; unit: string; adopted: boolean; start: number; length: number; byte_order: string }[];
+}
+
+export type Values = Record<string, Record<string, unknown>>; // device id -> "Message.Signal" -> value
+
 export interface Snapshot {
   interfaces: InterfaceInfo[];
   offline: OfflineInfo[];
   periodic: Periodic[];
   activity: Activity[];
+  devices: DeviceView[];
+  values: Values;
+  templates: TemplateSummary[];
+  databases: DatabaseSummary[];
   now: number;
 }
 
@@ -147,7 +260,10 @@ export type FeedEvent =
   | { kind: "periodic"; items: Periodic[]; removed: string[] }
   | { kind: "activity"; entries: Activity[] }
   | { kind: "captures"; changed: boolean }
-  | { kind: "offline"; offline: OfflineInfo[] };
+  | { kind: "offline"; offline: OfflineInfo[] }
+  | { kind: "devices"; devices: DeviceView[]; removed: string[] }
+  | { kind: "values"; values: Values; t: number }
+  | { kind: "databases"; databases: DatabaseSummary[] };
 
 export interface FrameDict {
   frame: string;
@@ -327,6 +443,37 @@ export class Api {
 
   capture(action: "start" | "stop" | "delete" | "open" | "close", args: { entry_id?: string; name?: string; source?: string }): Promise<{ name?: string; sources?: OfflineInfo[] }> {
     return this.hass().callWS({ type: "woow_can/capture/control", action, ...args });
+  }
+
+  saveDevice(device: Record<string, unknown>): Promise<DeviceView> {
+    return this.hass().callWS({ type: "woow_can/devices/save", device });
+  }
+
+  deleteDevice(deviceId: string): Promise<void> {
+    return this.hass().callWS({ type: "woow_can/devices/delete", device_id: deviceId });
+  }
+
+  setSignal(deviceId: string, message: string, signal: string, change: { adopted?: boolean; entity?: EntitySettings }): Promise<DeviceView> {
+    return this.hass().callWS({ type: "woow_can/devices/signal", device_id: deviceId, message, signal, ...change });
+  }
+
+  createFromTemplate(template: string, entryId: string, name: string, params: Record<string, unknown>, groups: string[] | null): Promise<DeviceView> {
+    return this.hass().callWS({ type: "woow_can/templates/create", template, entry_id: entryId, name, params, groups });
+  }
+
+  decode(source: string, raw: number, data: string): Promise<{ decoded: Decoded[] }> {
+    return this.hass().callWS({ type: "woow_can/decode", source, raw, data });
+  }
+
+  dbc(action: "attach" | "delete" | "create_device", name: string, args: { interfaces?: string[]; entry_id?: string; device_name?: string; messages?: string[] } = {}): Promise<DeviceView | Record<string, never>> {
+    return this.hass().callWS({ type: "woow_can/dbc/control", action, name, ...args });
+  }
+
+  async uploadDbc(file: File, attach: string[]): Promise<DatabaseSummary> {
+    const query = `name=${encodeURIComponent(file.name)}${attach.length ? `&attach=${encodeURIComponent(attach.join(","))}` : ""}`;
+    const res = await this.hass().fetchWithAuth(`/api/woow_can/dbc?${query}`, { method: "POST", body: file });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    return (await res.json()) as DatabaseSummary;
   }
 
   /** Let the browser save a file served by the backend: a short-lived signed URL, no token in it. */

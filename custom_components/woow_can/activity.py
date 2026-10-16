@@ -34,6 +34,16 @@ MESSAGES = {
     "capture_deleted": "deleted recording {file}",
     "capture_uploaded": "uploaded {file}",
     "monitor_cleared": "cleared the monitor of {port}",
+    "device_created": 'created device "{device}" on {port}',
+    "device_updated": 'updated device "{device}" on {port}',
+    "device_from_template": 'created device "{device}" from template {template} on {port}',
+    "device_from_dbc": 'created device "{device}" from {file} on {port}',
+    "device_deleted": 'deleted device "{device}"',
+    "device_save_failed": 'could not save device "{device}": {error}',
+    "signal_changed": '{device}: changed signal {signal}',
+    "dbc_imported": "imported {file} ({messages} messages)",
+    "dbc_attached": "{file} decodes {ports}",
+    "dbc_deleted": "deleted {file}",
 }
 
 

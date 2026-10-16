@@ -15,6 +15,7 @@ from .can_port import CanFrame, IdMatcher, parse_id
 from .capture import trace_matcher
 from .const import CONF_EVENT_FILTER, CONF_MAX_RATE, DOMAIN, TRACE_PAGE
 from .periodic import PeriodicError
+from .signals import DefinitionError
 
 _COMMANDS: list[Any] = []
 
@@ -357,4 +358,159 @@ async def ws_capture_control(hass: HomeAssistant, connection: websocket_api.Acti
     except (HomeAssistantError, ValueError, OSError) as err:
         connection.send_error(msg["id"], "failed", str(err))
         return
+    connection.send_result(msg["id"], result)
+
+
+# ---- devices, templates, DBC files -----------------------------------------------------------
+def _definition_error(connection: websocket_api.ActiveConnection, msg: dict, err: DefinitionError) -> None:
+    connection.send_error(msg["id"], err.code, str(err))
+
+
+def _device_args(admin: AdminHub, device) -> dict[str, Any]:
+    return {"device": device.name, "port": _name(admin, device.interface)}
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "woow_can/devices/save", vol.Required("device"): dict})
+@websocket_api.async_response
+async def ws_device_save(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    existing = admin.devices.devices.get(msg["device"].get("id", ""))
+    try:
+        device = await admin.devices.async_save(msg["device"])
+    except DefinitionError as err:
+        _definition_error(connection, msg, err)
+        return
+    await _log(admin, connection, "save_device", "device_updated" if existing else "device_created",
+               _device_args(admin, device), device_id=device.id, port_id=device.interface)
+    connection.send_result(msg["id"], admin.devices.device_view(device))
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "woow_can/devices/delete", vol.Required("device_id"): str})
+@websocket_api.async_response
+async def ws_device_delete(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    device = await admin.devices.async_delete(msg["device_id"])
+    if device is not None:
+        await _log(admin, connection, "delete_device", "device_deleted", {"device": device.name},
+                   device_id=device.id, port_id=device.interface)
+    connection.send_result(msg["id"])
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/devices/signal",
+    vol.Required("device_id"): str,
+    vol.Required("message"): str,
+    vol.Required("signal"): str,
+    vol.Optional("adopted"): bool,
+    vol.Optional("entity"): dict,
+})
+@websocket_api.async_response
+async def ws_device_signal(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Adopt / drop one signal as an entity, or change its entity settings (min_interval, tolerance, timeout...)."""
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        device = await admin.async_set_signal(msg["device_id"], msg["message"], msg["signal"], msg.get("adopted"),
+                                              msg.get("entity"))
+    except DefinitionError as err:
+        _definition_error(connection, msg, err)
+        return
+    await _log(admin, connection, "set_signal", "signal_changed",
+               {"device": device.name, "signal": f"{msg['message']}.{msg['signal']}"}, device_id=device.id,
+               port_id=device.interface)
+    connection.send_result(msg["id"], admin.devices.device_view(device))
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/templates/create",
+    vol.Required("template"): str,
+    vol.Required("entry_id"): str,
+    vol.Optional("name", default=""): str,
+    vol.Optional("params", default={}): dict,
+    vol.Optional("groups"): vol.Any(None, [str]),
+})
+@websocket_api.async_response
+async def ws_template_create(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        device = await admin.async_create_from_template(msg["template"], msg["entry_id"], msg["name"], msg["params"],
+                                                        msg.get("groups"))
+    except DefinitionError as err:
+        _definition_error(connection, msg, err)
+        return
+    await _log(admin, connection, "create_from_template", "device_from_template",
+               {**_device_args(admin, device), "template": device.template or "?"}, device_id=device.id,
+               port_id=device.interface)
+    connection.send_result(msg["id"], admin.devices.device_view(device))
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/decode",
+    vol.Required("source"): str,
+    vol.Required("raw"): int,
+    vol.Required("data"): str,
+})
+@callback
+def ws_decode(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    try:
+        data = bytes.fromhex(msg["data"])
+        result = admin.decode(msg["source"], msg["raw"], data)
+    except (ValueError, HomeAssistantError) as err:
+        connection.send_error(msg["id"], "invalid", str(err))
+        return
+    connection.send_result(msg["id"], {"decoded": result})
+
+
+@_command
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "woow_can/dbc/control",
+    vol.Required("action"): vol.In(["attach", "delete", "create_device"]),
+    vol.Required("name"): str,
+    vol.Optional("interfaces"): [str],
+    vol.Optional("entry_id"): str,
+    vol.Optional("device_name", default=""): str,
+    vol.Optional("messages"): [str],
+})
+@websocket_api.async_response
+async def ws_dbc_control(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if (admin := _admin(hass, connection, msg)) is None:
+        return
+    action = msg["action"]
+    result: dict[str, Any] = {}
+    try:
+        if action == "attach":
+            await admin.databases.async_set_attach(msg["name"], msg.get("interfaces") or [])
+            await _log(admin, connection, "attach_dbc", "dbc_attached",
+                       {"file": msg["name"], "ports": ", ".join(_name(admin, e) if e != "*" else "*"
+                                                                for e in msg.get("interfaces") or []) or "-"})
+        elif action == "delete":
+            await admin.databases.async_delete(msg["name"])
+            await _log(admin, connection, "delete_dbc", "dbc_deleted", {"file": msg["name"]})
+        else:
+            device = await admin.async_create_from_dbc(msg["name"], msg.get("entry_id") or "", msg["device_name"],
+                                                       msg.get("messages"))
+            await _log(admin, connection, "create_from_dbc", "device_from_dbc",
+                       {**_device_args(admin, device), "file": msg["name"]}, device_id=device.id,
+                       port_id=device.interface)
+            result = admin.devices.device_view(device)
+    except DefinitionError as err:
+        _definition_error(connection, msg, err)
+        return
+    admin.databases_changed()
     connection.send_result(msg["id"], result)

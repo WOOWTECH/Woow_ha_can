@@ -28,6 +28,7 @@ from .can_port import CanFrame, IdMatcher, parse_id
 from .capture import trace_matcher
 from .const import ATTR_ENTRY, DOMAIN, PERIODIC_MIN_MS, SERVICE_SEND
 from .periodic import PeriodicError
+from .signals import DefinitionError, Signal
 
 if TYPE_CHECKING:
     from .admin import AdminHub
@@ -36,7 +37,8 @@ if TYPE_CHECKING:
 _NOTE = vol.Optional("note", default="")  # every change can say why; shown in the activity log
 _LIMIT = vol.All(vol.Coerce(int), vol.Range(min=1, max=2000))
 _WAIT = vol.All(vol.Coerce(int), vol.Range(min=0, max=60000))
-ADMIN_SERVICES = {SERVICE_SEND, "save_periodic", "control_periodic", "capture", "clear_monitor"}
+ADMIN_SERVICES = {SERVICE_SEND, "save_periodic", "control_periodic", "capture", "clear_monitor", "create_from_template",
+                  "save_device", "delete_device", "set_signal", "import_dbc", "attach_dbc", "create_from_dbc"}
 EXPECT_WAIT = 1.0  # s, when wait_id is given without wait_ms
 
 SEND_SCHEMA = vol.Schema({
@@ -156,9 +158,27 @@ def describe(hass: HomeAssistant) -> dict[str, Any]:
             "send (admin): one frame, optionally waiting for a reply ID. Interfaces in listen-only mode cannot "
             "send. Never send to vehicles or machinery unless the user asked for that exact frame.",
             "save_periodic / control_periodic (admin): frames sent every period_ms.",
-            "capture (admin): record an interface to a candump log file under <config>/woow_can/captures.",
+            "capture (admin): record an interface to a candump log file in the config folder's woow_can/captures.",
+            "Devices turn signals into Home Assistant entities. Known equipment: list_templates, then "
+            "create_from_template {template, interface, params}; without groups it includes the protocol groups "
+            "whose IDs the interface has seen. DBC files: import_dbc, attach_dbc (names and decodes frames), "
+            "create_from_dbc. Unknown frames: test_signal tries a bit field on recent frames; save_device stores "
+            "a definition (get_device shows the shape); set_signal adopts a signal or tunes its entity.",
+            "decode_frame shows what the definitions make of one frame; list_devices / get_device show current values.",
             "Give every change a short `note`: people read it in the panel's activity log.",
         ],
+        "device_definition": {
+            "name": "unique", "interface": "interface name or config entry id",
+            "messages": "[{name, can_id (hex text, 1-3 digits = 11-bit) or pgn (J1939 / NMEA 2000, decimal), "
+                        "source (J1939 source address), length, cycle_ms (timeout = max(3 cycles, 5 s)), "
+                        "filters [{byte, value}], transport (j1939_tp | n2k_fast), signals}]",
+            "signals": "[{name, start, length, byte_order little (Intel, start = LSB) | big (Motorola, start = MSB, "
+                       "DBC numbering), signed, kind int | float | ascii, factor, offset, unit, values {raw: label}, "
+                       "invalid j1939 | n2k | sma | [raw values], mux_by, mux_values, derive {op: product | sum | "
+                       "difference | any | nonzero | present, of: [signal names]}, entity}]",
+            "entity": "{name, key, platform sensor | binary_sensor, device_class, state_class, unit, precision, "
+                      "enabled, min_interval (s), tolerance, timeout (s), on [raw], off [raw], format hex, icon}",
+        },
         "frame_notation": "cansend: 123#11223344 (11-bit), 18FF50E5#0102 (29-bit), 123#R (remote), "
                           "456##1AABBCC (CAN FD; the digit after ## is the flags, 1 = bit rate switch)",
         "id_lists": "comma separated: 123, 18FF50E5, 7E0/7F0 (ID/mask), 100-1FF (range), * (all)",
@@ -356,6 +376,165 @@ def async_register(hass: HomeAssistant) -> None:
         await record(call, "clear_monitor", "monitor_cleared", {"port": hub.name}, port_id=hub.entry.entry_id)
         return {"ok": True} if call.return_response else None
 
+    # ---- devices, templates, DBC (0.3) ------------------------------------------------------
+    def _bad(err: DefinitionError) -> ServiceValidationError:
+        return _invalid("bad_definition", code=err.code, detail=str(err))
+
+    def _device(admin: AdminHub, ref: str):
+        device = admin.devices.resolve(ref)
+        if device is None:
+            raise _invalid("unknown_device", device=ref,
+                           devices=", ".join(sorted(d.name for d in admin.devices.devices.values())) or "-")
+        return device
+
+    def _device_out(admin: AdminHub, device, definition: bool) -> dict[str, Any]:
+        view = admin.devices.device_view(device, with_definition=definition)
+        view["interface_name"] = _hubs(hass)[device.interface].name if device.interface in _hubs(hass) else None
+        return view
+
+    async def s_list_templates(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        return {"templates": admin.templates.summaries(hass.config.language or "en", call.data.get("category"))}
+
+    async def s_create_from_template(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        hub = resolve_interface(hass, call.data["interface"])
+        try:
+            device = await admin.async_create_from_template(call.data["template"], hub.entry.entry_id,
+                                                            call.data["name"], call.data["params"],
+                                                            call.data.get("groups"))
+        except DefinitionError as err:
+            raise _bad(err) from err
+        await record(call, "create_from_template", "device_from_template",
+                     {"device": device.name, "port": hub.name, "template": device.template or "?"},
+                     device_id=device.id, port_id=hub.entry.entry_id)
+        return {"device": _device_out(admin, device, False)} if call.return_response else None
+
+    async def s_list_devices(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        entry_id = resolve_interface(hass, call.data["interface"]).entry.entry_id if call.data.get("interface") else None
+        return {"devices": [_device_out(admin, d, False) for d in admin.devices.devices.values()
+                            if entry_id is None or d.interface == entry_id]}
+
+    async def s_get_device(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        return {"device": _device_out(admin, _device(admin, call.data["device"]), True)}
+
+    async def s_save_device(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        raw = dict(call.data["device"])
+        if raw.get("interface"):
+            raw["interface"] = resolve_interface(hass, str(raw["interface"])).entry.entry_id
+        if not raw.get("id") and raw.get("name"):  # the same name updates that device
+            same = admin.devices.resolve(str(raw["name"]))
+            if same is not None:
+                raw["id"] = same.id
+        existing = raw.get("id") in admin.devices.devices
+        try:
+            device = await admin.devices.async_save(raw)
+        except DefinitionError as err:
+            raise _bad(err) from err
+        await record(call, "save_device", "device_updated" if existing else "device_created",
+                     {"device": device.name, "port": _hubs(hass)[device.interface].name
+                      if device.interface in _hubs(hass) else "?"}, device_id=device.id, port_id=device.interface)
+        return {"device": _device_out(admin, device, True)} if call.return_response else None
+
+    async def s_delete_device(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        device = _device(admin, call.data["device"])
+        await admin.devices.async_delete(device.id)
+        await record(call, "delete_device", "device_deleted", {"device": device.name}, device_id=device.id,
+                     port_id=device.interface)
+        return {"ok": True} if call.return_response else None
+
+    async def s_set_signal(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        device = _device(admin, call.data["device"])
+        entity = {k: call.data[k] for k in ("min_interval", "tolerance", "timeout", "enabled", "name", "device_class",
+                                           "unit", "precision") if k in call.data}
+        try:
+            device = await admin.async_set_signal(device.id, call.data["message"], call.data["signal"],
+                                                  call.data.get("adopted"), entity or None)
+        except DefinitionError as err:
+            raise _bad(err) from err
+        await record(call, "set_signal", "signal_changed",
+                     {"device": device.name, "signal": f"{call.data['message']}.{call.data['signal']}"},
+                     device_id=device.id, port_id=device.interface)
+        return {"device": _device_out(admin, device, False)} if call.return_response else None
+
+    async def s_decode_frame(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        hub = resolve_interface(hass, call.data["interface"])
+        try:
+            frame = CanFrame.parse(call.data["frame"])
+        except ValueError as err:
+            raise _invalid("bad_frame", error=str(err)) from err
+        return {"frame": str(frame), "decoded": admin.decode(hub.entry.entry_id, frame.raw_id, frame.data)}
+
+    async def s_test_signal(call: ServiceCall) -> ServiceResponse:
+        """Try a candidate bit field on the recent frames of one ID (reverse engineering)."""
+        hub = resolve_interface(hass, call.data["interface"])
+        try:
+            can_id, extended = parse_id(call.data["can_id"])
+            sig = Signal(name="candidate", start=call.data["start"], length=call.data["length"],
+                         byte_order=call.data["byte_order"], signed=call.data["signed"], factor=call.data["factor"],
+                         offset=call.data["offset"])
+        except (ValueError, DefinitionError) as err:
+            raise _invalid("bad_ids", error=str(err)) from err
+        raw_id = can_id | (0x80000000 if extended else 0)
+        match = trace_matcher(lambda raw: raw & 0xDFFFFFFF == raw_id, None, errors=False)
+        snapshot = hub.trace.snapshot()
+        page = await hass.async_add_executor_job(snapshot.page, None, call.data["limit"], match,
+                                                 time.time() - call.data["seconds"])
+        series = [(f.t, sig.decode_raw(f.data)[1]) for f in reversed(page["frames"])]
+        numbers = [v for _, v in series if isinstance(v, (int, float))]
+        changes = sum(1 for (_, a), (_, b) in zip(series, series[1:]) if a != b)
+        return {"interface": hub.name, "frames": len(series), "distinct_values": len({v for _, v in series}),
+                "changes": changes, "min": min(numbers) if numbers else None, "max": max(numbers) if numbers else None,
+                "first": series[0][1] if series else None, "last": series[-1][1] if series else None,
+                "samples": [{"time": round(t, 3), "value": v} for t, v in series[-20:]]}
+
+    async def s_import_dbc(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        interfaces = [resolve_interface(hass, ref).entry.entry_id if ref != "*" else "*"
+                      for ref in call.data["attach"]]
+        try:
+            summary = await admin.databases.async_import(call.data["name"], call.data["content"].encode("utf-8"),
+                                                         interfaces)
+        except DefinitionError as err:
+            raise _bad(err) from err
+        await record(call, "import_dbc", "dbc_imported", {"file": summary["name"], "messages": summary["messages"]})
+        admin.databases_changed()
+        return {"database": summary} if call.return_response else None
+
+    async def s_list_databases(call: ServiceCall) -> ServiceResponse:
+        return {"databases": _need_admin(hass).databases.summaries()}
+
+    async def s_attach_dbc(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        name = admin.databases.resolve(call.data["name"])
+        if name is None:
+            raise _invalid("bad_definition", code="unknown_dbc", detail=call.data["name"])
+        interfaces = [resolve_interface(hass, ref).entry.entry_id if ref != "*" else "*"
+                      for ref in call.data["interfaces"]]
+        await admin.databases.async_set_attach(name, interfaces)
+        await record(call, "attach_dbc", "dbc_attached", {"file": name, "ports": ", ".join(call.data["interfaces"]) or "-"})
+        admin.databases_changed()
+        return {"database": admin.databases.summary(name)} if call.return_response else None
+
+    async def s_create_from_dbc(call: ServiceCall) -> ServiceResponse:
+        admin = _need_admin(hass)
+        hub = resolve_interface(hass, call.data["interface"])
+        try:
+            device = await admin.async_create_from_dbc(call.data["dbc"], hub.entry.entry_id, call.data["name"],
+                                                       call.data.get("messages"))
+        except DefinitionError as err:
+            raise _bad(err) from err
+        await record(call, "create_from_dbc", "device_from_dbc",
+                     {"device": device.name, "port": hub.name, "file": call.data["dbc"]}, device_id=device.id,
+                     port_id=hub.entry.entry_id)
+        return {"device": _device_out(admin, device, False)} if call.return_response else None
+
     register("describe", s_describe, {}, SupportsResponse.ONLY)
     register("list_interfaces", s_list_interfaces, {}, SupportsResponse.ONLY)
     register("get_monitor", s_get_monitor, {vol.Optional("interface"): cv.string, vol.Optional("ids"): cv.string,
@@ -384,3 +563,42 @@ def async_register(hass: HomeAssistant) -> None:
              SupportsResponse.OPTIONAL)
     register("clear_monitor", s_clear_monitor, {vol.Required("interface"): cv.string, _NOTE: cv.string},
              SupportsResponse.OPTIONAL)
+    register("list_templates", s_list_templates, {vol.Optional("category"): cv.string}, SupportsResponse.ONLY)
+    register("create_from_template", s_create_from_template, {
+        vol.Required("template"): cv.string, vol.Required("interface"): cv.string,
+        vol.Optional("name", default=""): cv.string, vol.Optional("params", default={}): dict,
+        vol.Optional("groups"): [cv.string], _NOTE: cv.string}, SupportsResponse.OPTIONAL)
+    register("list_devices", s_list_devices, {vol.Optional("interface"): cv.string}, SupportsResponse.ONLY)
+    register("get_device", s_get_device, {vol.Required("device"): cv.string}, SupportsResponse.ONLY)
+    register("save_device", s_save_device, {vol.Required("device"): dict, _NOTE: cv.string}, SupportsResponse.OPTIONAL)
+    register("delete_device", s_delete_device, {vol.Required("device"): cv.string, _NOTE: cv.string},
+             SupportsResponse.OPTIONAL)
+    register("set_signal", s_set_signal, {
+        vol.Required("device"): cv.string, vol.Required("message"): cv.string, vol.Required("signal"): cv.string,
+        vol.Optional("adopted"): cv.boolean, vol.Optional("enabled"): cv.boolean,
+        vol.Optional("min_interval"): vol.All(vol.Coerce(float), vol.Range(min=0, max=3600)),
+        vol.Optional("tolerance"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+        vol.Optional("timeout"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0.1, max=86400))),
+        vol.Optional("name"): cv.string, vol.Optional("device_class"): cv.string, vol.Optional("unit"): cv.string,
+        vol.Optional("precision"): vol.All(vol.Coerce(int), vol.Range(min=0, max=12)), _NOTE: cv.string},
+        SupportsResponse.OPTIONAL)
+    register("decode_frame", s_decode_frame, {vol.Required("interface"): cv.string, vol.Required("frame"): cv.string},
+             SupportsResponse.ONLY)
+    register("test_signal", s_test_signal, {
+        vol.Required("interface"): cv.string, vol.Required("can_id"): cv.string,
+        vol.Required("start"): vol.All(vol.Coerce(int), vol.Range(min=0, max=511)),
+        vol.Required("length"): vol.All(vol.Coerce(int), vol.Range(min=1, max=64)),
+        vol.Optional("byte_order", default="little"): vol.In(["little", "big"]),
+        vol.Optional("signed", default=False): cv.boolean, vol.Optional("factor", default=1.0): vol.Coerce(float),
+        vol.Optional("offset", default=0.0): vol.Coerce(float),
+        vol.Optional("seconds", default=60.0): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=86400)),
+        vol.Optional("limit", default=2000): _LIMIT}, SupportsResponse.ONLY)
+    register("import_dbc", s_import_dbc, {vol.Required("name"): cv.string, vol.Required("content"): cv.string,
+                                          vol.Optional("attach", default=[]): [cv.string], _NOTE: cv.string},
+             SupportsResponse.OPTIONAL)
+    register("list_databases", s_list_databases, {}, SupportsResponse.ONLY)
+    register("attach_dbc", s_attach_dbc, {vol.Required("name"): cv.string, vol.Required("interfaces"): [cv.string],
+                                          _NOTE: cv.string}, SupportsResponse.OPTIONAL)
+    register("create_from_dbc", s_create_from_dbc, {
+        vol.Required("dbc"): cv.string, vol.Required("interface"): cv.string, vol.Optional("name", default=""): cv.string,
+        vol.Optional("messages"): [cv.string], _NOTE: cv.string}, SupportsResponse.OPTIONAL)

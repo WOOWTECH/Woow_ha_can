@@ -79,6 +79,15 @@ class TraceBuffer:
         self.seq = 0
         self.long.clear()
 
+    def recent_ids(self, limit: int = 20000) -> set[int]:
+        """Raw IDs among the most recent frames (error frames left out)."""
+        out: set[int] = set()
+        for seq in range(self.seq - 1, max(self.first, self.seq - limit) - 1, -1):
+            _ts, raw, _length, flags, _data = REC.unpack_from(self.buf, (seq % self.capacity) * REC.size)
+            if not flags & F_ERR:
+                out.add(raw)
+        return out
+
     def snapshot(self) -> TraceSnapshot:
         """A copy to read in an executor while frames keep arriving."""
         return TraceSnapshot(bytes(self.buf), self.capacity, self.first, self.seq, dict(self.long))

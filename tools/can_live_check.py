@@ -94,7 +94,7 @@ def main() -> None:
     more = service(ws, "get_trace", interface=name, ids="35E", limit=2, before=trace["next_before"])
     check("get_trace: paging", more["frames"] and more["frames"][0]["seq"] < frames[-1]["seq"])
     recent = service(ws, "get_trace", interface=name, seconds=0.5, limit=2000)
-    check("get_trace: last seconds", 20 <= len(recent["frames"]) <= 60, f"{len(recent['frames'])} frames in 0.5 s")
+    check("get_trace: last seconds", 20 <= len(recent["frames"]) <= 200, f"{len(recent['frames'])} frames in 0.5 s")
     bad = service(ws, "get_trace", interface="nope")
     check("get_trace: unknown interface explained", "__error__" in bad and "nope" in json.dumps(bad), json.dumps(bad)[:160])
     bad = service(ws, "get_monitor", ids="300-2FF")

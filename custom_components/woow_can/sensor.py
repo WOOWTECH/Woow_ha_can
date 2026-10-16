@@ -8,12 +8,16 @@ from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant, callback
 
 from .can_port import CAN_STATES
+from .const import CONF_KIND, KIND_HUB
 from .entity import WoowCanEntity
 
 _FRAME_ATTRS = frozenset({"frame", "id", "id_hex", "data", "length", "extended", "fd", "brs", "rtr"})
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
+    if entry.data.get(CONF_KIND) == KIND_HUB:  # the admin entry: sensors of the devices
+        entry.runtime_data.devices.register_platform("sensor", async_add_entities)
+        return
     hub = entry.runtime_data
     async_add_entities([
         LastFrame(hub, "last_frame"), LastFrame(hub, "last_sent_frame"), BusState(hub),

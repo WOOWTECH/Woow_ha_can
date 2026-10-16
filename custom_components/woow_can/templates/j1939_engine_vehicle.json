@@ -1,0 +1,711 @@
+{
+ "id": "j1939_engine_vehicle",
+ "version": 1,
+ "name": {
+  "en": "J1939 engine and vehicle",
+  "zh-Hant": "J1939 引擎與車輛"
+ },
+ "category": "vehicle",
+ "description": {
+  "en": "Trucks, buses, generator sets, farm and marine diesel engines (SAE J1939, FMS): engine speed, torque, temperatures, oil pressure and level, fuel rate and economy, vehicle speed, battery voltage, engine hours.",
+  "zh-Hant": "卡車、巴士、發電機組、農機與船用柴油引擎（SAE J1939、FMS）：轉速、扭矩、各種溫度、機油壓力與油位、油耗、車速、電瓶電壓、運轉時數。"
+ },
+ "bitrate": 250000,
+ "transmits": false,
+ "manufacturer": "J1939 ECU",
+ "model": "SAE J1939",
+ "default_name": {
+  "en": "Engine",
+  "zh-Hant": "引擎"
+ },
+ "source": [
+  "FMS-Standard v02.00 (FMS working group)",
+  "Hatz E1 CAN protocol (2024)",
+  "Vector AN-ION-1-3100 Introduction to J1939",
+  "canboat j1939 data (Apache-2.0)",
+  "pretty_j1939 (Apache-2.0)"
+ ],
+ "license": "Facts from public documents, written by WOOWTECH; MIT. The full SPN list (SAE J1939DA) is licensed by SAE and is not included: import your own DBC for more.",
+ "verified": [
+  "Example frames from the FMS standard and Hatz documents"
+ ],
+ "confidence": "high",
+ "notes": {
+  "en": "Fields marked as from open sources only are disabled by default. 0xFE / 0xFF in a field means error / not available and shows as unavailable.",
+  "zh-Hant": "只有開源資料佐證的欄位預設停用。欄位值 0xFE／0xFF 代表錯誤／無資料，會顯示為無法使用。"
+ },
+ "params": [
+  {
+   "key": "source_address",
+   "default": "",
+   "description": {
+    "en": "Source address of the ECU in hex (e.g. 00); empty = any",
+    "zh-Hant": "ECU 的來源位址（十六進位，例如 00）；空白＝任何"
+   }
+  }
+ ],
+ "groups": [],
+ "messages": [
+  {
+   "name": "EEC1",
+   "pgn": 61444,
+   "source": "source_address",
+   "length": 8,
+   "cycle_ms": 20,
+   "signals": [
+    {
+     "name": "DriversDemandTorque",
+     "start": 8,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "offset": -125,
+     "unit": "%",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.demand_torque",
+      "name": {
+       "en": "Driver's demand torque",
+       "zh-Hant": "駕駛需求扭矩"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "ActualEngineTorque",
+     "start": 16,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "offset": -125,
+     "unit": "%",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.torque",
+      "name": {
+       "en": "Actual engine torque",
+       "zh-Hant": "引擎實際扭矩"
+      },
+      "icon": "mdi:engine"
+     }
+    },
+    {
+     "name": "EngineSpeed",
+     "start": 24,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.125,
+     "unit": "rpm",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.speed",
+      "name": {
+       "en": "Engine speed",
+       "zh-Hant": "引擎轉速"
+      },
+      "precision": 0,
+      "icon": "mdi:engine"
+     }
+    },
+    {
+     "name": "ControllingDevice",
+     "start": 40,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.controlling_device",
+      "name": {
+       "en": "Torque source address",
+       "zh-Hant": "扭矩來源位址"
+      },
+      "format": "hex",
+      "enabled": false,
+      "category": "diagnostic"
+     }
+    },
+    {
+     "name": "EngineDemandTorque",
+     "start": 56,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "offset": -125,
+     "unit": "%",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.engine_demand_torque",
+      "name": {
+       "en": "Engine demand torque",
+       "zh-Hant": "引擎需求扭矩"
+      },
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "CCVS1",
+   "pgn": 65265,
+   "source": "source_address",
+   "length": 8,
+   "cycle_ms": 100,
+   "signals": [
+    {
+     "name": "ParkingBrake",
+     "start": 2,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": "j1939",
+     "comment": "position from open sources only",
+     "entity": {
+      "key": "vehicle.parking_brake",
+      "name": {
+       "en": "Parking brake",
+       "zh-Hant": "手煞車"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    },
+    {
+     "name": "WheelBasedSpeed",
+     "start": 8,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.00390625,
+     "unit": "km/h",
+     "invalid": "j1939",
+     "entity": {
+      "key": "vehicle.speed",
+      "name": {
+       "en": "Vehicle speed",
+       "zh-Hant": "車速"
+      },
+      "precision": 1
+     }
+    },
+    {
+     "name": "CruiseControlActive",
+     "start": 24,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": "j1939",
+     "entity": {
+      "key": "vehicle.cruise_control",
+      "name": {
+       "en": "Cruise control",
+       "zh-Hant": "定速巡航"
+      },
+      "platform": "binary_sensor"
+     }
+    },
+    {
+     "name": "BrakeSwitch",
+     "start": 28,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": "j1939",
+     "entity": {
+      "key": "vehicle.brake",
+      "name": {
+       "en": "Brake pedal",
+       "zh-Hant": "煞車踏板"
+      },
+      "platform": "binary_sensor"
+     }
+    },
+    {
+     "name": "ClutchSwitch",
+     "start": 30,
+     "length": 2,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": "j1939",
+     "entity": {
+      "key": "vehicle.clutch",
+      "name": {
+       "en": "Clutch pedal",
+       "zh-Hant": "離合器"
+      },
+      "platform": "binary_sensor",
+      "enabled": false
+     }
+    },
+    {
+     "name": "CruiseSetSpeed",
+     "start": 40,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "unit": "km/h",
+     "invalid": "j1939",
+     "comment": "position from open sources only",
+     "entity": {
+      "key": "vehicle.cruise_set_speed",
+      "name": {
+       "en": "Cruise set speed",
+       "zh-Hant": "巡航設定速度"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "PtoGovernorState",
+     "start": 48,
+     "length": 5,
+     "byte_order": "little",
+     "signed": false,
+     "invalid": "j1939",
+     "entity": {
+      "key": "vehicle.pto_state",
+      "name": {
+       "en": "PTO governor state",
+       "zh-Hant": "PTO 狀態"
+      },
+      "enabled": false,
+      "precision": 0,
+      "state_class": "none"
+     }
+    }
+   ]
+  },
+  {
+   "name": "ET1",
+   "pgn": 65262,
+   "source": "source_address",
+   "length": 8,
+   "cycle_ms": 1000,
+   "signals": [
+    {
+     "name": "CoolantTemperature",
+     "start": 0,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "offset": -40,
+     "unit": "degC",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.coolant_temperature",
+      "name": {
+       "en": "Coolant temperature",
+       "zh-Hant": "冷卻液溫度"
+      }
+     }
+    },
+    {
+     "name": "FuelTemperature",
+     "start": 8,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "offset": -40,
+     "unit": "degC",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.fuel_temperature",
+      "name": {
+       "en": "Fuel temperature",
+       "zh-Hant": "燃油溫度"
+      }
+     }
+    },
+    {
+     "name": "OilTemperature",
+     "start": 16,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.03125,
+     "offset": -273,
+     "unit": "degC",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.oil_temperature",
+      "name": {
+       "en": "Oil temperature",
+       "zh-Hant": "機油溫度"
+      },
+      "precision": 1
+     }
+    },
+    {
+     "name": "TurboOilTemperature",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.03125,
+     "offset": -273,
+     "unit": "degC",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.turbo_oil_temperature",
+      "name": {
+       "en": "Turbo oil temperature",
+       "zh-Hant": "渦輪機油溫度"
+      },
+      "precision": 1,
+      "enabled": false
+     }
+    },
+    {
+     "name": "IntercoolerTemperature",
+     "start": 48,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "offset": -40,
+     "unit": "degC",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.intercooler_temperature",
+      "name": {
+       "en": "Intercooler temperature",
+       "zh-Hant": "中冷器溫度"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "ThermostatOpening",
+     "start": 56,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.4,
+     "unit": "%",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.thermostat_opening",
+      "name": {
+       "en": "Thermostat opening",
+       "zh-Hant": "節溫器開度"
+      },
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "EFL_P1",
+   "pgn": 65263,
+   "source": "source_address",
+   "length": 8,
+   "cycle_ms": 500,
+   "signals": [
+    {
+     "name": "FuelDeliveryPressure",
+     "start": 0,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 4,
+     "unit": "kPa",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.fuel_pressure",
+      "name": {
+       "en": "Fuel delivery pressure",
+       "zh-Hant": "燃油壓力"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "CrankcaseBlowbyPressure",
+     "start": 8,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.05,
+     "unit": "kPa",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.blowby_pressure",
+      "name": {
+       "en": "Crankcase blow-by pressure",
+       "zh-Hant": "曲軸箱漏氣壓力"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "OilLevel",
+     "start": 16,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.4,
+     "unit": "%",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.oil_level",
+      "name": {
+       "en": "Oil level",
+       "zh-Hant": "機油油位"
+      },
+      "precision": 0,
+      "icon": "mdi:oil-level"
+     }
+    },
+    {
+     "name": "OilPressure",
+     "start": 24,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 4,
+     "unit": "kPa",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.oil_pressure",
+      "name": {
+       "en": "Oil pressure",
+       "zh-Hant": "機油壓力"
+      },
+      "precision": 0
+     }
+    },
+    {
+     "name": "CrankcasePressure",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.0078125,
+     "offset": -250,
+     "unit": "kPa",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.crankcase_pressure",
+      "name": {
+       "en": "Crankcase pressure",
+       "zh-Hant": "曲軸箱壓力"
+      },
+      "precision": 1,
+      "enabled": false
+     }
+    },
+    {
+     "name": "CoolantPressure",
+     "start": 48,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 2,
+     "unit": "kPa",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.coolant_pressure",
+      "name": {
+       "en": "Coolant pressure",
+       "zh-Hant": "冷卻液壓力"
+      },
+      "enabled": false
+     }
+    },
+    {
+     "name": "CoolantLevel",
+     "start": 56,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.4,
+     "unit": "%",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.coolant_level",
+      "name": {
+       "en": "Coolant level",
+       "zh-Hant": "冷卻液液位"
+      },
+      "precision": 0,
+      "icon": "mdi:coolant-temperature"
+     }
+    }
+   ]
+  },
+  {
+   "name": "LFE1",
+   "pgn": 65266,
+   "source": "source_address",
+   "length": 8,
+   "cycle_ms": 100,
+   "signals": [
+    {
+     "name": "FuelRate",
+     "start": 0,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.05,
+     "unit": "L/h",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.fuel_rate",
+      "name": {
+       "en": "Fuel rate",
+       "zh-Hant": "燃油流率"
+      },
+      "precision": 1,
+      "icon": "mdi:fuel"
+     }
+    },
+    {
+     "name": "InstantFuelEconomy",
+     "start": 16,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.001953125,
+     "unit": "km/L",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.instant_fuel_economy",
+      "name": {
+       "en": "Instant fuel economy",
+       "zh-Hant": "瞬時油耗"
+      },
+      "precision": 1
+     }
+    },
+    {
+     "name": "AverageFuelEconomy",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.001953125,
+     "unit": "km/L",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.average_fuel_economy",
+      "name": {
+       "en": "Average fuel economy",
+       "zh-Hant": "平均油耗"
+      },
+      "precision": 1,
+      "enabled": false
+     }
+    },
+    {
+     "name": "ThrottlePosition",
+     "start": 48,
+     "length": 8,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.4,
+     "unit": "%",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.throttle",
+      "name": {
+       "en": "Throttle position",
+       "zh-Hant": "油門開度"
+      },
+      "precision": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "VEP1",
+   "pgn": 65271,
+   "source": "source_address",
+   "length": 8,
+   "cycle_ms": 1000,
+   "signals": [
+    {
+     "name": "BatteryPotential",
+     "start": 32,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.05,
+     "unit": "V",
+     "invalid": "j1939",
+     "entity": {
+      "key": "vehicle.battery_voltage",
+      "name": {
+       "en": "Battery voltage",
+       "zh-Hant": "電瓶電壓"
+      }
+     }
+    },
+    {
+     "name": "KeyswitchPotential",
+     "start": 48,
+     "length": 16,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.05,
+     "unit": "V",
+     "invalid": "j1939",
+     "entity": {
+      "key": "vehicle.keyswitch_voltage",
+      "name": {
+       "en": "Key switch voltage",
+       "zh-Hant": "鑰匙開關電壓"
+      },
+      "enabled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "HOURS",
+   "pgn": 65253,
+   "source": "source_address",
+   "length": 8,
+   "comment": "some ECUs send it only when asked",
+   "signals": [
+    {
+     "name": "EngineHours",
+     "start": 0,
+     "length": 32,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 0.05,
+     "unit": "h",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.hours",
+      "name": {
+       "en": "Engine hours",
+       "zh-Hant": "引擎運轉時數"
+      },
+      "state_class": "total_increasing",
+      "precision": 1
+     }
+    },
+    {
+     "name": "EngineRevolutions",
+     "start": 32,
+     "length": 32,
+     "byte_order": "little",
+     "signed": false,
+     "factor": 1000,
+     "unit": "r",
+     "invalid": "j1939",
+     "entity": {
+      "key": "engine.revolutions",
+      "name": {
+       "en": "Engine revolutions",
+       "zh-Hant": "引擎總轉數"
+      },
+      "state_class": "total_increasing",
+      "enabled": false
+     }
+    }
+   ]
+  }
+ ]
+}

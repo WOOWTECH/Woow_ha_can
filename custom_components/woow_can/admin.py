@@ -22,6 +22,11 @@ from homeassistant.util import dt as dt_util, slugify
 from .activity import ActivityLog
 from .can_port import F_ERR, CanFrame
 from .capture import Recording, TraceBuffer, read_log, safe_name
+from .databases import DatabaseLibrary
+from .devices import DeviceManager
+from .monitor import TX_KEY
+from .signals import DefinitionError, j1939_pgn
+from .templates import TemplateLibrary
 from .const import (
     CAPTURE_DIR,
     CAPTURE_FLUSH,
@@ -37,6 +42,12 @@ from .panel import async_register_panel, async_remove_panel
 from .periodic import ItemState, PeriodicItem, PeriodicManager
 
 _LOGGER = logging.getLogger(__name__)
+
+
+# J1939 / NMEA 2000 network management a monitor row can be named after, with or without a device
+J1939_NAMES = {0xEC00: "J1939 TP.CM", 0xEB00: "J1939 TP.DT", 0xEA00: "J1939 Request", 0xEE00: "J1939 Address Claimed",
+               0xE800: "J1939 Acknowledgment", 0xFECA: "J1939 DM1", 0xFECB: "J1939 DM2", 126996: "N2K Product Information",
+               126993: "N2K Heartbeat", 126208: "N2K Group Function", 126464: "N2K PGN List"}
 
 
 def hubs(hass: HomeAssistant) -> dict[str, CanHub]:
@@ -81,6 +92,11 @@ class AdminHub:
         self.hass = hass
         self.entry = entry
         self.activity = ActivityLog(hass)
+        self.devices = DeviceManager(hass, entry)
+        self.templates = TemplateLibrary(hass)
+        self.databases = DatabaseLibrary(hass)
+        self._names: dict[str, dict[int, str | None]] = {}  # entry id -> raw id -> message name
+        self._names_version: tuple[int, int] = (0, 0)
         self.periodic = PeriodicManager(hass, self._periodic_send)
         self.periodic.on_stopped = self._periodic_stopped
         self.capture_dir = hass.config.path(CAPTURE_DIR)
@@ -99,15 +115,27 @@ class AdminHub:
     async def async_start(self) -> None:
         await self.activity.async_load()
         await self.periodic.async_load()
+        await self.devices.async_load()
+        await self.templates.async_load()
+        await self.databases.async_load()
+        # Entity rows of signals no longer adopted; before any platform registers.
+        self.devices.prune_registry()
         self._unsubs += [
             self.activity.subscribe(lambda payload: self._send("activity", payload)),
             self.periodic.subscribe(lambda payload: self._send("periodic", payload)),
+            self.devices.subscribe(self._send),
             self.hass.bus.async_listen(EVENT_HOMEASSISTANT_FINAL_WRITE, self._async_final_write),
         ]
+        self.devices.start()
+        for hub in self.hubs.values():
+            hub.frame_hook = self.devices.on_frame
         await async_register_panel(self.hass)
 
     async def async_stop(self) -> None:
         self.periodic.shutdown()
+        self.devices.stop()
+        for hub in self.hubs.values():
+            hub.frame_hook = None
         for hub in list(self.hubs.values()):
             await self.async_stop_capture(hub.entry.entry_id, log=False)
         for unsub in self._unsubs:
@@ -122,14 +150,17 @@ class AdminHub:
         async_remove_panel(self.hass)
         await self.activity.async_flush()
         await self.periodic.async_flush()
+        await self.devices.async_flush()
 
     async def _async_final_write(self, _event: Event) -> None:
         await self.activity.async_flush()
         await self.periodic.async_flush()
+        await self.devices.async_flush()
 
     # ---- interfaces coming and going ---------------------------------------------------
     @callback
     def hub_added(self, hub: CanHub) -> None:
+        hub.frame_hook = self.devices.on_frame
         if self._subs:
             self._watch_status(hub)
         self._send("interfaces", {"interfaces": [hub.info()], "removed": []})
@@ -203,13 +234,129 @@ class AdminHub:
             cb(kind, payload)
 
     def snapshot(self) -> dict[str, Any]:
+        language = self.hass.config.language or "en"
         return {
             "interfaces": [hub.info() for hub in self.hubs.values()],
             "offline": [src.info() for src in self.offline.values()],
             "periodic": self.periodic.snapshot(),
             "activity": self.activity.recent(200),
+            "devices": [self.devices.device_view(d) for d in self.devices.devices.values()],
+            "values": self.devices.values,
+            "templates": self.templates.summaries(language),
+            "databases": self.databases.summaries(),
             "now": time.time(),
         }
+
+    # ---- names and decoding (monitor) ------------------------------------------------------
+    def _definitions(self, entry_id: str | None) -> list[tuple[str, Any]]:
+        """(where from, Message) for an interface: its devices first, then attached DBC files."""
+        out: list[tuple[str, Any]] = []
+        for device in self.devices.devices.values():
+            if entry_id is not None and device.interface == entry_id:
+                out.extend((device.name, m) for m in device.messages)
+        out.extend(self.databases.messages_for(entry_id))
+        return out
+
+    def message_name(self, entry_id: str | None, raw: int) -> str | None:
+        version = (self.devices.version, self.databases.version)
+        if version != self._names_version:
+            self._names.clear()
+            self._names_version = version
+        cache = self._names.setdefault(entry_id or "", {})
+        if raw not in cache:
+            name = next((m.name for _src, m in self._definitions(entry_id) if m.matches(raw)), None)
+            if name is None and raw & 0x80000000:
+                name = J1939_NAMES.get(j1939_pgn(raw))
+            cache[raw] = name
+        return cache[raw]
+
+    def names_for(self, source: Any, keys: list[int]) -> dict[int, str]:
+        entry_id = source.entry.entry_id if hasattr(source, "entry") else None
+        out = {}
+        for key in keys:
+            name = self.message_name(entry_id, key % TX_KEY if key >= TX_KEY else key)
+            if name:
+                out[key] = name
+        return out
+
+    def decode(self, source_id: str, raw: int, data: bytes) -> list[dict[str, Any]]:
+        """What the definitions on an interface make of one frame."""
+        src = self.source(source_id)
+        entry_id = src.entry.entry_id if hasattr(src, "entry") else None
+        out = []
+        for origin, msg in self._definitions(entry_id):
+            if msg.transport == "n2k_fast" or not msg.matches(raw, data):  # a single fast-packet frame says little
+                continue
+            values = msg.decode(data)
+            out.append({"source": origin, "message": msg.name, "signals": [
+                {"name": sig.name, "value": values.get(sig.name), "unit": sig.unit, "adopted": bool(sig.entity),
+                 "start": sig.start, "length": sig.length, "byte_order": sig.byte_order}
+                for sig in msg.signals if sig.name in values]})
+        return out
+
+    # ---- devices -----------------------------------------------------------------------------
+    @callback
+    def databases_changed(self) -> None:
+        self._send("databases", {"databases": self.databases.summaries()})
+
+    async def async_set_signal(self, device_ref: str, message: str, signal: str, adopted: bool | None,
+                               entity: dict[str, Any] | None):
+        """Adopt or drop a signal, or merge new entity settings into it."""
+        device = self.devices.resolve(device_ref)
+        if device is None:
+            raise DefinitionError("unknown_device", device=device_ref)
+        raw = device.as_dict()
+        msg = next((m for m in raw["messages"] if m["name"] == message), None)
+        if msg is None:
+            raise DefinitionError("unknown_message", device=device.name, message=message)
+        sig = next((s for s in msg["signals"] if s["name"] == signal), None)
+        if sig is None:
+            raise DefinitionError("unknown_signal", device=device.name, signal=signal)
+        if adopted is False:
+            sig.pop("entity", None)
+        else:
+            current = dict(sig.get("entity") or {})
+            if adopted or entity:
+                for key, value in (entity or {}).items():
+                    if value is None:
+                        current.pop(key, None)
+                    else:
+                        current[key] = value
+                current.setdefault("enabled", True)
+                sig["entity"] = current
+        return await self.devices.async_save(raw)
+
+    def seen_ids(self, entry_id: str) -> set[int]:
+        """IDs the interface has received lately: its monitor, and the trace buffer (which a cleared monitor keeps)."""
+        hub = self.hubs.get(entry_id)
+        if hub is None:
+            return set()
+        return {key for key in hub.monitor.stats if key < TX_KEY} | hub.trace.recent_ids()
+
+    async def async_create_from_template(self, template_ref: str, entry_id: str, name: str,
+                                         params: dict[str, Any] | None, groups: list[str] | None):
+        template = self.templates.get(template_ref)
+        if template is None:
+            raise DefinitionError("unknown_template", template=template_ref,
+                                  templates=", ".join(sorted(self.templates.templates)))
+        raw = self.templates.instantiate(template, entry_id, name, params, groups, self.hass.config.language or "en",
+                                         self.seen_ids(entry_id))
+        return await self.devices.async_save(raw)
+
+    async def async_create_from_dbc(self, dbc_ref: str, entry_id: str, name: str, messages: list[str] | None):
+        dbc_name = self.databases.resolve(dbc_ref)
+        if dbc_name is None:
+            raise DefinitionError("unknown_dbc", name=dbc_ref)
+        definitions = self.databases.definitions(dbc_name, messages)
+        adopted = []
+        for definition in definitions:
+            definition = {**definition, "signals": [
+                {**sig, "entity": sig.get("entity") or {"enabled": True}} if not sig.get("multiplexor") else sig
+                for sig in definition["signals"]]}
+            adopted.append(definition)
+        raw = {"name": name.strip() or dbc_name.removesuffix(".dbc"), "interface": entry_id, "source": f"dbc:{dbc_name}",
+               "manufacturer": "DBC", "model": dbc_name, "messages": adopted}
+        return await self.devices.async_save(raw)
 
     # ---- monitor viewers ---------------------------------------------------------------
     @callback
@@ -217,9 +364,10 @@ class AdminHub:
         src = self.source(source_id)
         viewer = Viewer(send)
         detach = src.monitor.attach(viewer)
+        viewer.named = set(src.monitor.stats)
         send({"seq": 0, "t": round(time.time(), 6), "full": True, "rows": src.monitor.full(),
               "overflow": src.monitor.overflow, "frames": src.monitor.frames, "trace_end": src.trace.seq,
-              "trace_first": src.trace.first})
+              "trace_first": src.trace.first, "names": self.names_for(src, list(src.monitor.stats))})
         pair = (src, viewer)
         self._viewers.append(pair)
         if self._viewer_handle is None:
@@ -242,6 +390,10 @@ class AdminHub:
         for src, viewer in list(self._viewers):
             payload = src.monitor.batch(viewer, now, {"trace_end": src.trace.seq, "trace_first": src.trace.first})
             if payload is not None:
+                fresh = [row[0] for row in payload["rows"] if row[0] not in viewer.named]
+                if fresh or payload.get("clear"):
+                    viewer.named.update(fresh)
+                    payload["names"] = self.names_for(src, fresh)
                 viewer.send(payload)
         self._viewer_handle = self.hass.loop.call_later(MONITOR_PUSH, self._push_viewers)
 
